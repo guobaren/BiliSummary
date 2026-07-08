@@ -3,555 +3,547 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BiViNote - B站视频字幕笔记神器 | Bilibili Subtitle Note Tool</title>
-  <meta name="description" content="BiViNote 是一款浏览器扩展，支持 Bilibili 视频字幕抓取、智能截图、SRT/Markdown 导出，配合 DeepSeek AI 自动整理笔记。">
-  <meta name="keywords" content="BiViNote, Bilibili, B站, 字幕, 笔记, 截图, SRT, Markdown, DeepSeek, AI, 视频笔记">
-  <meta name="author" content="hygl">
-  <meta name="robots" content="index, follow">
-  <link rel="canonical" href="https://hyglgithub.github.io/BiViNote/">
+  <title>BiliSummary - B 站字幕 AI 总结扩展</title>
+  <meta
+    name="description"
+    content="BiliSummary 是一个面向 Bilibili 的浏览器扩展，支持抓取字幕并生成 AI 总结，支持继续追问与 SRT 导出。"
+  >
+  <meta
+    name="keywords"
+    content="BiliSummary,Bilibili,B站,字幕,AI总结,DeepSeek,SRT"
+  >
+  <meta name="author" content="BiliSummary Contributors">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://guobaren.github.io/BiliSummary/">
 
-  <!-- Open Graph -->
   <meta property="og:type" content="website">
-  <meta property="og:title" content="BiViNote - B站视频字幕笔记神器">
-  <meta property="og:description" content="Bilibili 视频字幕抓取、智能截图、AI 自动整理笔记的浏览器扩展">
-  <meta property="og:url" content="https://hyglgithub.github.io/BiViNote/">
-  <meta property="og:image" content="https://hyglgithub.github.io/BiViNote/screenshots/demo.png">
+  <meta property="og:title" content="BiliSummary - B 站字幕 AI 总结扩展">
+  <meta
+    property="og:description"
+    content="抓取 B 站字幕，生成 AI 总结，支持追问和 SRT 导出。"
+  >
+  <meta property="og:url" content="https://guobaren.github.io/BiliSummary/">
   <meta property="og:locale" content="zh_CN">
 
-  <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="BiViNote - B站视频字幕笔记神器">
-  <meta name="twitter:description" content="Bilibili 视频字幕抓取、智能截图、AI 自动整理笔记的浏览器扩展">
-  <meta name="twitter:image" content="https://hyglgithub.github.io/BiViNote/screenshots/demo.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="BiliSummary - B 站字幕 AI 总结扩展">
+  <meta
+    name="twitter:description"
+    content="抓取 B 站字幕，生成 AI 总结，支持追问和 SRT 导出。"
+  >
 
   <link rel="icon" type="image/png" href="icons/icon-32.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&display=swap"
+    rel="stylesheet"
+  >
   <style>
-    /* 全局重置 */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
+    :root {
+      --bg: #f4f7fb;
+      --panel: #ffffff;
+      --line: #dde7f2;
+      --line-soft: #ebf1f7;
+      --text: #132944;
+      --muted: #5e728c;
+      --accent: #0f6fff;
+      --accent-soft: #edf4ff;
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --shadow: 0 18px 40px rgba(14, 35, 67, 0.08);
+      --max-width: 1200px;
+      --nav-height: 72px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      color: #333;
-      background: #f8fbff;
-      line-height: 1.6;
+      margin: 0;
+      font-family: "Noto Sans SC", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top, rgba(15, 111, 255, 0.08), transparent 26%),
+        var(--bg);
+      line-height: 1.55;
     }
-    a { color: #00A1D6; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    img { max-width: 100%; height: auto; }
 
-    /* 导航栏 */
-    #navbar {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 100;
-      background: rgba(255, 255, 255, 0.85);
-      backdrop-filter: blur(10px);
-      border-bottom: 1px solid #eee;
-    }
-    .nav-inner {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 12px 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .nav-brand {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: #333;
-      font-weight: 600;
-      font-size: 18px;
-    }
-    .nav-brand:hover { text-decoration: none; }
-    .nav-logo-img { width: 32px; height: 32px; }
-    .nav-github {
-      padding: 6px 16px;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      font-size: 14px;
-      color: #333;
-      transition: all 0.2s;
-    }
-    .nav-github:hover {
-      background: #f5f5f5;
+    a {
+      color: inherit;
       text-decoration: none;
     }
 
-    /* Hero 区 */
-    #hero {
-      padding: 60px 24px 0;
-    }
-    .hero-inner {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      gap: 40px;
-      align-items: center;
-    }
-    .hero-content {
-      flex: 0.7;
-    }
-    .hero-demo {
-      flex: 1.3;
-    }
-    .hero-demo .carousel {
-      border-radius: 12px;
-    }
-    .hero-title {
-      font-size: 42px;
-      font-weight: 700;
-      line-height: 1.3;
-      margin-bottom: 16px;
-    }
-    .hero-title span { display: block; }
-    .hero-subtitle {
-      font-size: 18px;
-      color: #666;
-      margin-bottom: 24px;
-      line-height: 1.8;
-    }
-    .hero-buttons {
-      display: flex;
-      gap: 12px;
-    }
-    .btn {
-      display: inline-block;
-      padding: 14px 32px;
-      border-radius: 8px;
-      font-size: 16px;
-      font-weight: 500;
-      transition: all 0.2s;
-    }
-    .btn-primary {
-      background: #00A1D6;
-      color: #fff;
-      box-shadow: 0 4px 12px rgba(0, 161, 214, 0.3);
-    }
-    .btn-primary:hover {
-      background: #0090c0;
-      text-decoration: none;
-      transform: translateY(-1px);
-      box-shadow: 0 6px 16px rgba(0, 161, 214, 0.4);
-    }
-    .btn-secondary {
-      background: #fff;
-      color: #333;
-      border: 1px solid #ddd;
-    }
-    .btn-secondary:hover {
-      background: #f5f5f5;
-      text-decoration: none;
-    }
-
-    /* 功能卡片 */
-    #features {
-      padding: 40px 24px;
-    }
-    .features-inner {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 20px;
-    }
-    .feature-card {
-      padding: 24px 16px;
-      background: #fff;
-      border: 1px solid #eee;
-      border-radius: 8px;
-      transition: all 0.2s;
-    }
-    .feature-card:hover {
-      border-color: #00A1D6;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-      transform: translateY(-2px);
-    }
-    .feature-icon {
-      font-size: 32px;
-      margin-bottom: 12px;
-    }
-    .feature-icon svg {
-      width: 32px;
-      height: 32px;
-      color: #00A1D6;
-    }
-    .feature-name {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-    .feature-desc {
-      font-size: 13px;
-      color: #888;
-    }
-
-    /* 功能演示 + 快速开始 */
-    #demo-tutorial {
-      padding: 30px 24px 0;
-    }
-    .demo-tutorial-inner {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      gap: 40px;
-    }
-    .video-section-block {
-      flex: 3;
-    }
-    .video-section-block .video-wrapper {
-      max-width: none;
-      border-radius: 12px;
-      overflow: hidden;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-    }
-    .video-section-block .video-wrapper iframe {
-      width: 100%;
-      aspect-ratio: 16 / 9;
-      height: auto;
+    img {
       display: block;
-    }
-    .tutorial-section {
-      flex: 2;
-    }
-    .section-title {
-      font-size: 24px;
-      font-weight: 700;
-      margin-bottom: 24px;
+      max-width: 100%;
     }
 
-    /* 轮播 */
-    .carousel {
-      position: relative;
-      overflow: hidden;
-      border-radius: 12px;
-      background: #f8f9fa;
-      text-align: center;
-    }
-    .carousel-track {
-      display: flex;
-      transition: transform 0.4s ease;
-    }
-    .carousel-slide {
-      min-width: 100%;
-      padding: 24px 24px 0;
-    }
-    .slide-content {
-      text-align: center;
-      margin-bottom: 24px;
-    }
-    .slide-title {
-      font-size: 20px;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-    .slide-desc {
-      color: #666;
-      font-size: 14px;
-    }
-    .slide-img {
-      width: 100%;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-    }
-    .dot {
-      display: inline-block;
-      width: 10px;
-      height: 10px;
-      background: #ddd;
-      border-radius: 50%;
-      margin: 4px 4px 8px;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .dot.active { background: #00A1D6; }
-
-    /* 使用教程区 */
-    .tutorial-inner {
-      max-width: 700px;
+    .container {
+      width: min(var(--max-width), calc(100% - 28px));
       margin: 0 auto;
     }
-    .steps {
-      margin-bottom: 48px;
+
+    .nav {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: rgba(244, 247, 251, 0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(19, 41, 68, 0.05);
     }
-    .step {
+
+    .nav-inner {
+      min-height: var(--nav-height);
       display: flex;
+      align-items: center;
+      justify-content: space-between;
       gap: 16px;
-      align-items: flex-start;
-      padding: 20px;
-      background: #fff;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      border: 1px solid #eee;
     }
-    .step-num {
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 18px;
+    }
+
+    .brand img {
       width: 36px;
       height: 36px;
-      background: #00A1D6;
-      color: #fff;
-      border-radius: 50%;
+      border-radius: 10px;
+    }
+
+    .nav-links {
       display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .nav-links a,
+    .button {
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.7);
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .nav-links a:hover,
+    .button:hover {
+      background: #fff;
+      border-color: #cfdeef;
+    }
+
+    .button {
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-weight: 600;
-      font-size: 16px;
-      flex-shrink: 0;
-    }
-    .step-title {
-      font-weight: 600;
-      font-size: 16px;
-      margin-bottom: 4px;
-    }
-    .step-desc {
+      font-weight: 700;
       font-size: 14px;
-      color: #666;
-    }
-    .video-section {
-      text-align: center;
-    }
-    .video-title {
-      font-size: 20px;
-      font-weight: 600;
-      margin-bottom: 20px;
-    }
-    .video-wrapper {
-      max-width: 640px;
-      margin: 0 auto;
-      border-radius: 12px;
-      overflow: hidden;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-    }
-    .video-wrapper iframe {
-      width: 100%;
-      height: 360px;
-      display: block;
     }
 
-    /* 页脚 */
-    #footer {
-      padding: 8px 24px;
-      border-top: 1px solid #eee;
+    .button.primary {
+      color: #fff;
+      background: var(--accent);
+      border-color: var(--accent);
+      box-shadow: 0 12px 26px rgba(15, 111, 255, 0.18);
+    }
+
+    .button.primary:hover {
+      background: #0d63e6;
+      border-color: #0d63e6;
+    }
+
+    .main {
+      padding: 14px 0 18px;
+    }
+
+    .dashboard {
+      min-height: calc(100vh - var(--nav-height) - 32px);
+      display: grid;
+      grid-template-columns: 1.02fr 0.98fr;
+      grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 16px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .panel-body {
+      padding: 24px 26px;
+      height: 100%;
+    }
+
+    .hero-panel .panel-body {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .eyebrow {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(30px, 4.2vw, 54px);
+      line-height: 1.02;
+      letter-spacing: -0.04em;
+    }
+
+    .hero-text {
+      max-width: 620px;
+      color: var(--muted);
+      font-size: 16px;
+      margin: 0;
+    }
+
+    .hero-actions {
+      display: inline-flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .section-title {
+      margin: 0 0 14px;
+      font-size: clamp(22px, 3vw, 32px);
+      line-height: 1.12;
+    }
+
+    .section-subtitle {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .screens-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      height: calc(100% - 48px);
+    }
+
+    .shot {
+      border: 1px solid var(--line-soft);
+      border-radius: 16px;
+      background: #fbfdff;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .shot img {
+      width: 100%;
+      height: 240px;
+      object-fit: cover;
+      object-position: top;
+      border-bottom: 1px solid var(--line-soft);
       background: #fff;
     }
-    .footer-inner {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .footer-left {
-      font-size: 13px;
-      color: #999;
-    }
-    .footer-right {
-      display: flex;
-      gap: 20px;
-    }
-    .footer-right a {
-      font-size: 13px;
-      color: #666;
-      transition: color 0.2s;
-    }
-    .footer-right a:hover { color: #00A1D6; text-decoration: none; }
 
-    /* 响应式 */
-    @media (max-width: 768px) {
-      .hero-inner {
-        flex-direction: column;
+    .shot-copy {
+      padding: 12px 14px 14px;
+    }
+
+    .shot-copy h3 {
+      margin: 0 0 6px;
+      font-size: 18px;
+    }
+
+    .shot-copy p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+
+    .list-item {
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: #fbfdff;
+      border: 1px solid var(--line-soft);
+    }
+
+    .list-item strong {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 15px;
+    }
+
+    .list-item p,
+    .list-item span {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .install-panel .panel-body {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .tips {
+      padding-top: 2px;
+      border-top: 1px solid var(--line-soft);
+    }
+
+    .tips h3 {
+      margin: 0 0 8px;
+      font-size: 16px;
+    }
+
+    .tips ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+      display: grid;
+      gap: 6px;
+    }
+
+    code {
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #edf4ff;
+      color: var(--accent);
+      font-size: 12px;
+    }
+
+    .footer {
+      padding: 0 0 18px;
+    }
+
+    .footer-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 18px;
+      border-radius: var(--radius-md);
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .footer-links a {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fff;
+    }
+
+    @media (max-width: 980px) {
+      .dashboard {
+        min-height: auto;
+        grid-template-columns: 1fr;
+        grid-template-rows: auto;
       }
-      .hero-title { font-size: 28px; }
-      .hero-subtitle { font-size: 16px; }
-      .hero-buttons { flex-direction: column; }
-      .btn { width: 100%; text-align: center; }
-      .hero-demo { max-width: 100%; }
-      .features-inner { grid-template-columns: repeat(2, 1fr); }
-      .demo-tutorial-inner { flex-direction: column; }
-      .section-title { font-size: 20px; }
-      .step { flex-direction: column; gap: 12px; }
-      .footer-inner { flex-direction: column; gap: 12px; text-align: center; }
-      .footer-right { justify-content: center; }
+
+      .screens-grid {
+        height: auto;
+      }
+
+      .shot img {
+        height: 220px;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .nav-inner {
+        padding: 12px 0;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .panel-body {
+        padding: 20px;
+      }
+
+      .screens-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .shot img {
+        height: auto;
+        object-fit: contain;
+      }
     }
   </style>
 </head>
 <body>
-
-  <!-- 导航栏 -->
-  <nav id="navbar">
-    <div class="nav-inner">
-      <a href="#" class="nav-brand">
-        <img src="icons/icon-32.png" alt="BiViNote" class="nav-logo-img">
-        <span class="nav-title">BiViNote</span>
+  <nav class="nav">
+    <div class="container nav-inner">
+      <a class="brand" href="#">
+        <img src="icons/icon-32.png" alt="BiliSummary">
+        <span>BiliSummary</span>
       </a>
-      <a href="https://github.com/hyglgithub/BiViNote" target="_blank" class="nav-github">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="vertical-align: middle; margin-right: 4px;"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 00 16 8c0-4.42-3.58-8-8-8z"/></svg>
-        GitHub
-      </a>
+      <div class="nav-links">
+        <a href="#screens">展示</a>
+        <a href="#summary">功能</a>
+        <a href="#install">安装</a>
+        <a href="https://github.com/guobaren/BiliSummary" rel="noreferrer">GitHub</a>
+      </div>
     </div>
   </nav>
 
-  <!-- Hero 区 -->
-  <section id="hero">
-    <div class="hero-inner">
-      <div class="hero-content">
-        <h1 class="hero-title">
-          <span>看 B 站视频</span>
-          <span>还在手抄笔记？</span>
-        </h1>
-        <p class="hero-subtitle">
-          一键抓取字幕 + 截图<br>
-          自动整理，30 秒搞定！
-        </p>
-        <div class="hero-buttons">
-          <a href="https://github.com/hyglgithub/BiViNote/releases" target="_blank" class="btn btn-primary">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="vertical-align: middle; margin-right: 6px;"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 00 16 8c0-4.42-3.58-8-8-8z"/></svg>
-            GitHub 下载
-          </a>
-          <a href="https://wwbna.lanzouv.com/igplK3u1ibgf" target="_blank" class="btn btn-secondary">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 6px;"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="8 15 12 19 16 15"/><line x1="12" y1="19" x2="12" y2="10"/></svg>
-            蓝奏云下载
-          </a>
-        </div>
-      </div>
-      <div class="hero-demo">
-        <div class="carousel">
-          <div class="carousel-track" id="carouselTrack">
-            <div class="carousel-slide">
-              <div class="slide-content">
-                <h3 class="slide-title">抓取字幕 & 智能截图</h3>
-              </div>
-              <img src="screenshots/demo-subtitle.png" alt="字幕抓取演示" class="slide-img">
+  <main class="main">
+    <div class="container">
+      <div class="dashboard">
+        <section class="panel hero-panel">
+          <div class="panel-body">
+            <div>
+              <span class="eyebrow">Bilibili Summary</span>
+              <h1>抓取字幕，直接生成 AI 总结</h1>
+              <p class="hero-text">
+                BiliSummary 是一个面向 B 站视频的浏览器扩展。它会先读取当前视频字幕，再用 AI 生成结构化总结；总结完成后还能继续追问，并支持导出 SRT。
+              </p>
             </div>
-            <div class="carousel-slide">
-              <div class="slide-content">
-                <h3 class="slide-title">自动整理</h3>
-              </div>
-              <img src="screenshots/demo-doc-organize.png" alt="AI文档整理演示" class="slide-img">
+            <div class="hero-actions">
+              <a class="button primary" href="https://github.com/guobaren/BiliSummary/releases" rel="noreferrer">下载最新版本</a>
             </div>
           </div>
-          <span class="dot active" onclick="goToSlide(0)"></span>
-          <span class="dot" onclick="goToSlide(1)"></span>
-        </div>
+        </section>
+
+        <section class="panel" id="summary">
+          <div class="panel-body">
+            <h2 class="section-title">主要功能</h2>
+            <ul class="list">
+              <li class="list-item">
+                <strong>1. 右上角浮窗入口</strong>
+                <p>安装后网页右上角会常驻图标浮窗，点击即可弹出主窗体。</p>
+              </li>
+              <li class="list-item">
+                <strong>2. 自动读取视频字幕</strong>
+                <p>打开 B 站视频页后，扩展会抓取可用字幕内容，作为后续总结输入。</p>
+              </li>
+              <li class="list-item">
+                <strong>3. 一键生成结构化总结</strong>
+                <p>点击开始总结后，AI 会根据字幕输出更适合阅读和复盘的摘要内容。</p>
+              </li>
+              <li class="list-item">
+                <strong>4. 支持继续追问</strong>
+                <p>总结完成后可以接着问细节、要点或结论，不需要重新整理一遍字幕。</p>
+              </li>
+              <li class="list-item">
+                <strong>5. 支持两种 AI 通道</strong>
+                <p>可以直接使用 DeepSeek 浏览器 SDK，也可以配置自定义 OpenAI 兼容接口。</p>
+              </li>
+              <li class="list-item">
+                <strong>6. 导出当前字幕</strong>
+                <p>如果你想自己留档或交给其他工具继续处理，可以把字幕导出为 SRT 文件。</p>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="panel" id="screens">
+          <div class="panel-body">
+            <h2 class="section-title">界面展示</h2>
+            <div class="screens-grid">
+              <article class="shot">
+                <img src="screenshots/demo1.png" alt="BiliSummary AI 总结页">
+                <div class="shot-copy">
+                  <h3>AI 总结页</h3>
+                  <p>显示流式总结结果，支持复制、新对话和继续追问。</p>
+                </div>
+              </article>
+              <article class="shot">
+                <img src="screenshots/demo2.png" alt="BiliSummary 设置页">
+                <div class="shot-copy">
+                  <h3>设置页</h3>
+                  <p>配置字幕语言、提示词、显示选项和 AI 通道参数。</p>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel install-panel" id="install">
+          <div class="panel-body">
+            <div>
+              <h2 class="section-title">安装步骤</h2>
+              <p class="section-subtitle">适用于 Chrome 和 Edge。</p>
+            </div>
+            <ol class="list">
+              <li class="list-item">
+                <strong>1. 下载项目</strong>
+                <span>从 GitHub Releases 下载最新版本，或直接拉取仓库源码。</span>
+              </li>
+              <li class="list-item">
+                <strong>2. 打开扩展管理页</strong>
+                <span>Chrome 使用 <code>chrome://extensions/</code>，Edge 使用 <code>edge://extensions/</code>。</span>
+              </li>
+              <li class="list-item">
+                <strong>3. 开启开发者模式</strong>
+                <span>点击“加载已解压的扩展程序”，选择包含 <code>manifest.json</code> 的目录。</span>
+              </li>
+              <li class="list-item">
+                <strong>4. 打开 B 站视频页</strong>
+                <span>点击浏览器工具栏中的 BiliSummary 图标，即可开始抓取字幕并生成总结。</span>
+              </li>
+            </ol>
+            <div class="tips">
+              <h3>使用建议</h3>
+              <ul>
+                <li>选择 DeepSeek 浏览器 SDK 时，未登录会自动引导登录，也可以改用自定义接口。</li>
+                <li>如果你希望总结更偏向课程笔记或提纲，可以先在设置页调整提示词。</li>
+                <li>扩展依赖当前视频可用字幕；没有字幕时无法直接生成总结。</li>
+              </ul>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
-  </section>
+  </main>
 
-  <!-- 功能卡片区 -->
-  <section id="features">
-    <div class="features-inner">
-      <div class="feature-card">
-        <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg></div>
-        <div class="feature-name">抓取字幕</div>
-        <div class="feature-desc">中英多语言，逐句精准同步</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg></div>
-        <div class="feature-name">智能截图</div>
-        <div class="feature-desc">逐帧微调，裁剪翻转一站搞定</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 15l2 2 4-4"/></svg></div>
-        <div class="feature-name">自动整理</div>
-        <div class="feature-desc">AI 去口语化，秒变结构化笔记</div>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg></div>
-        <div class="feature-name">一键导出</div>
-        <div class="feature-desc">Markdown + 截图打包，即用即走</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 视频教程 + 快速开始 -->
-  <section id="demo-tutorial">
-    <div class="demo-tutorial-inner">
-      <div class="video-section-block">
-        <h2 class="section-title"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 8px;"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>使用教程</h2>
-        <div class="video-wrapper">
-          <iframe src="https://player.bilibili.com/player.html?bvid=BV18HTj6mEPP&high_quality=1&autoplay=0" style="border:none" scrolling="no" allowfullscreen></iframe>
-        </div>
-      </div>
-      <div class="tutorial-section">
-        <h2 class="section-title"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>快速开始</h2>
-        <div class="steps">
-          <div class="step">
-            <div class="step-num">1</div>
-            <div class="step-content">
-              <div class="step-title">下载安装包并解压</div>
-              <div class="step-desc">从 GitHub 或蓝奏云下载最新版本</div>
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">2</div>
-            <div class="step-content">
-              <div class="step-title">打开扩展管理页</div>
-              <div class="step-desc">Chrome: chrome://extensions/ &nbsp;|&nbsp; Edge: edge://extensions/</div>
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">3</div>
-            <div class="step-content">
-              <div class="step-title">开启开发者模式，加载扩展</div>
-              <div class="step-desc">点击「加载已解压的扩展程序」，选择包含 manifest.json 的目录</div>
-            </div>
-          </div>
-          <div class="step">
-            <div class="step-num">4</div>
-            <div class="step-content">
-              <div class="step-title">打开 B 站视频页，开始使用</div>
-              <div class="step-desc">点击浏览器工具栏上的 BiViNote 图标打开面板</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 页脚 -->
-  <footer id="footer">
-    <div class="footer-inner">
-      <div class="footer-left">
-        BiViNote │ MIT License │ © 2026 hyglgithub
-      </div>
-      <div class="footer-right">
-        <a href="https://github.com/hyglgithub/BiViNote" target="_blank">GitHub</a>
-        <a href="https://github.com/hyglgithub/BiViNote/releases" target="_blank">Releases</a>
-        <a href="https://github.com/hyglgithub/BiViNote/blob/main/LICENSE" target="_blank">MIT License</a>
+  <footer class="footer">
+    <div class="container footer-box">
+      <div>BiliSummary · MIT License</div>
+      <div class="footer-links">
+        <a href="https://github.com/guobaren/BiliSummary" rel="noreferrer">GitHub</a>
+        <a href="https://github.com/guobaren/BiliSummary/releases" rel="noreferrer">Releases</a>
+        <a href="https://github.com/guobaren/BiliSummary/blob/main/LICENSE" rel="noreferrer">License</a>
       </div>
     </div>
   </footer>
-
-  <script>
-  // 轮播
-  let currentSlide = 0;
-  const totalSlides = 2;
-
-  function moveCarousel(direction) {
-    currentSlide = (currentSlide + direction + totalSlides) % totalSlides;
-    updateCarousel();
-  }
-
-  function goToSlide(index) {
-    currentSlide = index;
-    updateCarousel();
-  }
-
-  function updateCarousel() {
-    const track = document.getElementById('carouselTrack');
-    track.style.transform = `translateX(-${currentSlide * 100}%)`;
-    document.querySelectorAll('.dot').forEach((dot, i) => {
-      dot.classList.toggle('active', i === currentSlide);
-    });
-  }
-
-  // 自动轮播
-  setInterval(() => {
-    moveCarousel(1);
-  }, 3000);
-  </script>
-
 </body>
 </html>

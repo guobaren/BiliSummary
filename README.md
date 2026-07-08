@@ -3,10 +3,11 @@
 [![GitHub release](https://img.shields.io/github/v/release/guobaren/BiliSummary?style=flat-square\&label=version)](https://github.com/guobaren/BiliSummary/releases)
 [![License](https://img.shields.io/github/license/guobaren/BiliSummary?style=flat-square)](LICENSE)
 
-BiliSumi 是一个 Chrome 扩展，在 B 站视频页抓取字幕并接入 AI 生成结构化总结。
+BiliSummary 是一个 Chrome 扩展，在 B 站视频页抓取字幕并接入 AI 生成结构化总结。
 
 ## 功能
 
+- **浮窗入口** — 安装后网页右上角常驻图标浮窗，点击即可弹出主窗体
 - **字幕抓取** — 自动获取 B 站视频字幕，支持多语言切换（中文优先）
 - **章节支持** — 展示视频章节，点击跳转
 - **字幕同步** — 播放时高亮当前字幕，支持自动滚动
@@ -71,7 +72,7 @@ git clone https://github.com/guobaren/BiliSummary.git
 ## 项目结构
 
 ```
-BiliSumi/
+BiliSummary/
 ├── manifest.json        # 扩展配置 (Manifest V3)
 ├── background.js        # Service Worker - API 代理、DeepSeek 直连通道、右键菜单
 ├── content.js           # 入口脚本 - 面板注入、路由监听
