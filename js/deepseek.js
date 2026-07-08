@@ -1,7 +1,7 @@
 // js/deepseek.js - DeepSeek 文档整理通信模块
 (function () {
   'use strict';
-  const BN = window.BiViNote;
+  const BN = window.BiliSummary;
   if (!BN) return;
 
   let state = 'not_logged_in';
@@ -171,7 +171,7 @@
 
   function openLogin() {
     if (state === 'reading' || state === 'responding') {
-      try { window.BiViNote.panel.showToast('总结中，已在新标签页后台打开'); } catch {}
+      try { window.BiliSummary.panel.showToast('总结中，已在新标签页后台打开'); } catch {}
     }
     chrome.runtime.sendMessage({ type: 'ds-open-login' });
   }

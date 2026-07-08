@@ -41,7 +41,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.get_version.outputs.VERSION }}
-          name: BiViNote v${{ steps.get_version.outputs.VERSION }}
+          name: BiliSummary v${{ steps.get_version.outputs.VERSION }}
           draft: false
           prerelease: false
           body: ${{ steps.extract_notes.outputs.NOTES }}

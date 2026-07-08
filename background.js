@@ -1,5 +1,5 @@
 /**
- * BiViNote Background Script (Service Worker)
+ * BiliSummary Background Script (Service Worker)
  * 代理 Bilibili API 请求，处理 CORS，管理图标状态
  */
 
@@ -27,7 +27,7 @@ function updateIconForTab(tabId, url) {
         128: 'icons/icon-128.png'
       }
     }).catch(() => {});
-    chrome.action.setTitle({ tabId, title: 'BiViNote - 点击打开' }).catch(() => {});
+    chrome.action.setTitle({ tabId, title: 'BiliSummary - 点击打开' }).catch(() => {});
   } else {
     chrome.action.setIcon({
       tabId,
@@ -38,7 +38,7 @@ function updateIconForTab(tabId, url) {
         128: 'icons/icon-128-disabled.png'
       }
     }).catch(() => {});
-    chrome.action.setTitle({ tabId, title: 'BiViNote - 仅在B站视频页可用' }).catch(() => {});
+    chrome.action.setTitle({ tabId, title: 'BiliSummary - 仅在B站视频页可用' }).catch(() => {});
   }
 }
 
@@ -336,7 +336,7 @@ async function fetchSubtitleList(bvid, cid, aid = '') {
     try {
       const payload = await fetchJson(request.url);
       if (payload.code !== 0) {
-        console.warn(`[BiViNote] ${request.source} failed:`, payload?.message);
+        console.warn(`[BiliSummary] ${request.source} failed:`, payload?.message);
         continue;
       }
       const data = payload.data || {};
@@ -360,7 +360,7 @@ async function fetchSubtitleList(bvid, cid, aid = '') {
 
       return { subtitles, chapters };
     } catch (err) {
-      console.warn(`[BiViNote] ${request.source} error:`, err.message);
+      console.warn(`[BiliSummary] ${request.source} error:`, err.message);
       continue;
     }
   }
@@ -918,7 +918,7 @@ async function dsHandleSend(markdown, prompt, requestId, senderChatId) {
       return;
     }
     // 不支持的 PoW 算法 → 回退到标签页注入
-    console.warn('[BiViNote] 直连通道不支持 PoW 算法，回退到标签页模式:', directErr.message);
+    console.warn('[BiliSummary] 直连通道不支持 PoW 算法，回退到标签页模式:', directErr.message);
   }
 
   // ── 回退：标签页注入模式 ──
@@ -1302,7 +1302,7 @@ async function dsDirectSend(prompt, chatId, requestId, parentMessageId) {
         return;
       }
       const powJson = await powRes.json();
-      console.log('[BiViNote] PoW response:', JSON.stringify(powJson).slice(0, 500));
+      console.log('[BiliSummary] PoW response:', JSON.stringify(powJson).slice(0, 500));
       // 尝试多种方式解析 PoW 挑战
       let powChallenge = dsParsePowChallenge(powJson);
       if (!powChallenge && powJson.data) {

@@ -1,11 +1,11 @@
 /**
- * BiViNote Content Script
+ * BiliSummary Content Script
  * 入口脚本 - 初始化所有模块，监听 SPA 路由变化
  */
 (async function () {
   'use strict';
 
-  const BN = window.BiViNote;
+  const BN = window.BiliSummary;
 
   // ── 浮动图标 ──
 
@@ -18,7 +18,7 @@
     floatIconEl.setAttribute('data-testid', 'bn-float-icon');
     const img = document.createElement('img');
     img.src = chrome.runtime.getURL('icons/icon-32.png');
-    img.alt = 'BiliSumi';
+    img.alt = 'BiliSummary';
     floatIconEl.appendChild(img);
     floatIconEl.addEventListener('click', () => {
       if (BN.state.panelVisible) {
@@ -70,9 +70,9 @@
         }
       });
 
-      console.log('[BiViNote] Initialized successfully');
+      console.log('[BiliSummary] Initialized successfully');
     } catch (err) {
-      console.error('[BiViNote] Initialization failed:', err);
+      console.error('[BiliSummary] Initialization failed:', err);
     }
   }
 

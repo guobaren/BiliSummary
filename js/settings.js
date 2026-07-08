@@ -1,11 +1,11 @@
 /**
- * BiViNote Settings Module
+ * BiliSummary Settings Module
  * 读写 chrome.storage.local，管理设置项
  */
 (function () {
   'use strict';
 
-  window.BiViNote = window.BiViNote || {};
+  window.BiliSummary = window.BiliSummary || {};
 
   const DEFAULTS = {
     fontSize: 'default',
@@ -50,36 +50,36 @@ UP主信息：提取作者名称。
     return new Promise(resolve => {
       chrome.storage.local.get(['bivinote_settings'], result => {
         if (chrome.runtime.lastError) {
-          console.warn('[BiViNote] Storage load error:', chrome.runtime.lastError);
+          console.warn('[BiliSummary] Storage load error:', chrome.runtime.lastError);
           resolve({ ...DEFAULTS });
           return;
         }
         const saved = result.bivinote_settings || {};
-        Object.assign(window.BiViNote.state.settings, { ...DEFAULTS, ...saved });
+        Object.assign(window.BiliSummary.state.settings, { ...DEFAULTS, ...saved });
         // 特殊处理 deepseekPrompt：如果 storage 里存的是空字符串（老版本遗留），
         // 说明用户未自定义，应恢复为默认提示词
         if (!saved.deepseekPrompt) {
-          window.BiViNote.state.settings.deepseekPrompt = DEFAULTS.deepseekPrompt;
+          window.BiliSummary.state.settings.deepseekPrompt = DEFAULTS.deepseekPrompt;
         }
         // 确保 apiCfg 存在
-        if (!window.BiViNote.state.settings.apiCfg) {
-          window.BiViNote.state.settings.apiCfg = { ...DEFAULTS.apiCfg };
+        if (!window.BiliSummary.state.settings.apiCfg) {
+          window.BiliSummary.state.settings.apiCfg = { ...DEFAULTS.apiCfg };
         } else {
-          Object.assign(window.BiViNote.state.settings.apiCfg, { ...DEFAULTS.apiCfg, ...saved.apiCfg });
+          Object.assign(window.BiliSummary.state.settings.apiCfg, { ...DEFAULTS.apiCfg, ...saved.apiCfg });
         }
-        resolve(window.BiViNote.state.settings);
+        resolve(window.BiliSummary.state.settings);
       });
     });
   }
 
   async function save() {
     return new Promise(resolve => {
-      const settings = window.BiViNote.state.settings;
+      const settings = window.BiliSummary.state.settings;
       chrome.storage.local.set({
         bivinote_settings: { ...settings },
       }, () => {
         if (chrome.runtime.lastError) {
-          console.warn('[BiViNote] Storage save error:', chrome.runtime.lastError);
+          console.warn('[BiliSummary] Storage save error:', chrome.runtime.lastError);
         }
         resolve();
       });
@@ -87,7 +87,7 @@ UP主信息：提取作者名称。
   }
 
   function resetDefaults() {
-    const s = window.BiViNote.state.settings;
+    const s = window.BiliSummary.state.settings;
     const preserved = {
       deepseekPrompt: s.deepseekPrompt,
       apiCfg: s.apiCfg,
@@ -96,7 +96,7 @@ UP主信息：提取作者名称。
     save();
   }
 
-  window.BiViNote.settings = {
+  window.BiliSummary.settings = {
     load,
     save,
     resetDefaults,

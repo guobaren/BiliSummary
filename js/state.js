@@ -1,10 +1,10 @@
 /**
- * BiViNote State Module
+ * BiliSummary State Module
  * 集中管理运行时状态
  */
-window.BiViNote = window.BiViNote || {};
+window.BiliSummary = window.BiliSummary || {};
 
-window.BiViNote.state = {
+window.BiliSummary.state = {
   // 视频信息
   bvid: '',
   aid: '',
@@ -53,8 +53,8 @@ window.BiViNote.state = {
 /**
  * 重置运行时状态（视频切换时调用）
  */
-window.BiViNote.state.reset = function () {
-  const s = window.BiViNote.state;
+window.BiliSummary.state.reset = function () {
+  const s = window.BiliSummary.state;
   s.bvid = '';
   s.aid = '';
   s.cid = '';

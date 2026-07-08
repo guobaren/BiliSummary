@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  const BN = window.BiViNote;
+  const BN = window.BiliSummary;
   if (!BN) return;
 
   // 内置模型清单（只是给 UI 提供默认值，用户可手动输入任意模型 ID）

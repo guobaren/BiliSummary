@@ -1,11 +1,11 @@
 /**
- * BiliSumi Panel Module
+ * BiliSummary Panel Module
  * 三标签页：字幕 / AI 总结 / 设置
  */
 (function () {
   'use strict';
 
-  window.BiViNote = window.BiViNote || {};
+  window.BiliSummary = window.BiliSummary || {};
 
   let panelEl = null;
   let mainWrapEl = null;
@@ -43,7 +43,7 @@
   // ── 创建面板 ──
 
   function createPanel() {
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
 
     panelEl = document.createElement('div');
     panelEl.className = 'bn-panel bn-hidden';
@@ -71,7 +71,7 @@
     minimizeBtn.className = 'bn-minimize';
     minimizeBtn.title = '最小化为浮动图标';
     minimizeBtn.textContent = '−';
-    minimizeBtn.addEventListener('click', () => window.BiViNote.panel.minimize());
+    minimizeBtn.addEventListener('click', () => window.BiliSummary.panel.minimize());
     headerEl.appendChild(minimizeBtn);
 
     setupDrag(headerEl);
@@ -149,7 +149,7 @@
     bindAiEvents();
 
     // 同步 footer 状态到当前标签页（默认 'ai'，footer 不显示）
-    const initialTab = window.BiViNote.state.activeTab || 'ai';
+    const initialTab = window.BiliSummary.state.activeTab || 'ai';
     switchTab(initialTab);
 
     // 应用字体、行高
@@ -206,7 +206,7 @@
 
     // DeepSeek 登录
     aiDsLoginBtn.addEventListener('click', () => {
-      window.BiViNote.deepseek.openLogin();
+      window.BiliSummary.deepseek.openLogin();
       startAiLoginPoll();
     });
 
@@ -233,8 +233,8 @@
     bindAiApiChannelEvents();
 
     // 默认检测 DeepSeek 登录状态
-    if (window.BiViNote.deepseek) {
-      window.BiViNote.deepseek.checkLogin().then(() => refreshAiStatusUI());
+    if (window.BiliSummary.deepseek) {
+      window.BiliSummary.deepseek.checkLogin().then(() => refreshAiStatusUI());
     }
   }
 
@@ -243,9 +243,9 @@
     stopAiLoginPoll();
     aiLoginPollStartTime = Date.now();
     aiLoginPollTimer = setInterval(async () => {
-      if (!window.BiViNote.deepseek) return;
-      await window.BiViNote.deepseek.checkLogin();
-      if (window.BiViNote.deepseek.getState() === 'ready' || Date.now() - aiLoginPollStartTime > 30000) {
+      if (!window.BiliSummary.deepseek) return;
+      await window.BiliSummary.deepseek.checkLogin();
+      if (window.BiliSummary.deepseek.getState() === 'ready' || Date.now() - aiLoginPollStartTime > 30000) {
         stopAiLoginPoll();
         refreshAiStatusUI();
       }
@@ -260,43 +260,43 @@
   }
 
   function bindAiBrowserChannelEvents() {
-    const ds = window.BiViNote.deepseek;
+    const ds = window.BiliSummary.deepseek;
     if (!ds) return;
     ds.onStateChange((s) => {
-      if ((window.BiViNote.state.settings.aiChannel || 'browser') !== 'browser') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'browser') return;
       refreshAiStatusUI(s);
     });
     ds.onChunk((chunk) => {
-      if ((window.BiViNote.state.settings.aiChannel || 'browser') !== 'browser') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'browser') return;
       appendAiStreamChunk(chunk);
     });
     ds.onDone(() => {
-      if ((window.BiViNote.state.settings.aiChannel || 'browser') !== 'browser') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'browser') return;
       onAiStreamDone();
     });
     ds.onError((err) => {
-      if ((window.BiViNote.state.settings.aiChannel || 'browser') !== 'browser') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'browser') return;
       onAiStreamError(err);
     });
   }
 
   function bindAiApiChannelEvents() {
-    const api = window.BiViNote.apiAI;
+    const api = window.BiliSummary.apiAI;
     if (!api) return;
     api.onStateChange((s) => {
-      if ((window.BiViNote.state.settings.aiChannel || 'browser') !== 'api') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'api') return;
       refreshAiStatusUI(s);
     });
     api.onChunk((chunk) => {
-      if ((window.BiViNote.state.settings.aiChannel || 'browser') !== 'api') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'api') return;
       appendAiStreamChunk(chunk);
     });
     api.onDone(() => {
-      if ((window.BiViNote.state.settings.aiChannel || 'browser') !== 'api') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'api') return;
       onAiStreamDone();
     });
     api.onError((err) => {
-      if ((window.BiViNote.state.settings.aiChannel || 'browser') !== 'api') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'api') return;
       onAiStreamError(err);
     });
   }
@@ -421,18 +421,18 @@
 
   function getAiResult() {
     if (getActiveChannel() === 'browser') {
-      return window.BiViNote.deepseek.getResult();
+      return window.BiliSummary.deepseek.getResult();
     }
     return { think: aiThinkEl?.textContent?.trim() || '', response: aiResultEl?.textContent?.trim() || '' };
   }
 
   function getActiveChannel() {
-    return window.BiViNote.state.settings.aiChannel || 'browser';
+    return window.BiliSummary.state.settings.aiChannel || 'browser';
   }
 
   async function onAiActionClick() {
     if (getActiveChannel() === 'browser') {
-      const ds = window.BiViNote.deepseek;
+      const ds = window.BiliSummary.deepseek;
       // 每次点击前重新检测登录，捕获外部登出
       const loginResult = await ds.checkLogin().catch(() => ({ loggedIn: false }));
       if (!loginResult?.loggedIn) {
@@ -448,7 +448,7 @@
         startAiSummary();
       }
     } else {
-      const api = window.BiViNote.apiAI;
+      const api = window.BiliSummary.apiAI;
       const st = api.getState();
       if (st === 'sending' || st === 'responding') {
         api.abort();
@@ -459,8 +459,8 @@
   }
 
   function onAiStopClick() {
-    if (getActiveChannel() === 'browser') window.BiViNote.deepseek.abort();
-    else window.BiViNote.apiAI.abort();
+    if (getActiveChannel() === 'browser') window.BiliSummary.deepseek.abort();
+    else window.BiliSummary.apiAI.abort();
   }
 
   function onAiCopyClick() {
@@ -470,9 +470,9 @@
 
   function onAiClearClick() {
     if (getActiveChannel() === 'browser') {
-      window.BiViNote.deepseek.clear();
+      window.BiliSummary.deepseek.clear();
     } else {
-      window.BiViNote.apiAI.clear();
+      window.BiliSummary.apiAI.clear();
       aiMessages = [];
     }
     aiThinkEl.style.display = 'none';
@@ -504,7 +504,7 @@
 
     if (getActiveChannel() === 'browser') {
       // 追问：直接发追问文本，chatId 让 DeepSeek 在同一会话中继续，像网页端一样多轮对话
-      window.BiViNote.deepseek.sendMarkdown(text, '');
+      window.BiliSummary.deepseek.sendMarkdown(text, '');
     } else {
       aiMessages.push({ role: 'user', content: text });
       sendAiApiMessages();
@@ -512,7 +512,7 @@
   }
 
   function startAiSummary() {
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
     if (!s.subtitleBody || s.subtitleBody.length === 0) {
       showToast('当前无字幕，无法总结');
       return;
@@ -528,10 +528,10 @@
 
     // 开启新对话时清空历史
     if (getActiveChannel() === 'browser') {
-      window.BiViNote.deepseek.clear();
+      window.BiliSummary.deepseek.clear();
       const videoContext = buildAiVideoContext();
       const prompt = s.settings.deepseekPrompt || '';
-      window.BiViNote.deepseek.sendMarkdown(videoContext, prompt);
+      window.BiliSummary.deepseek.sendMarkdown(videoContext, prompt);
     } else {
       aiMessages = [
         { role: 'system', content: buildAiSystemPrompt() },
@@ -542,8 +542,8 @@
   }
 
   function sendAiApiMessages() {
-    const cfg = window.BiViNote.state.settings.apiCfg || {};
-    window.BiViNote.apiAI.sendToApi(aiMessages, {
+    const cfg = window.BiliSummary.state.settings.apiCfg || {};
+    window.BiliSummary.apiAI.sendToApi(aiMessages, {
       endpoint: cfg.endpoint,
       apiKey: cfg.apiKey,
       model: cfg.model,
@@ -552,7 +552,7 @@
   }
 
   function buildAiSystemPrompt() {
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
     const custom = (s.settings.deepseekPrompt || '').trim();
     if (custom) {
       return custom.replace(/\{markdown\}/g, '').trim() || '你是一个视频内容总结助手。';
@@ -570,7 +570,7 @@
   }
 
   function buildAiVideoContext() {
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
     let text = '';
     if (s.title) text += `视频标题：${s.title}\n`;
     if (s.author) text += `作者：${s.author}\n`;
@@ -603,15 +603,15 @@
   function refreshAiStatusUI(forceState) {
     if (!aiStatusEl) return;
     // 始终从 settings 读取当前通道，保证和设置页同步
-    const channel = window.BiViNote.state.settings.aiChannel || 'browser';
+    const channel = window.BiliSummary.state.settings.aiChannel || 'browser';
 
     let st = forceState;
     if (!st) {
-      st = channel === 'browser' ? window.BiViNote.deepseek.getState() : window.BiViNote.apiAI.getState();
+      st = channel === 'browser' ? window.BiliSummary.deepseek.getState() : window.BiliSummary.apiAI.getState();
     }
 
     // 顶部状态行 & 通道标签
-    const cfg = window.BiViNote.state.settings.apiCfg || {};
+    const cfg = window.BiliSummary.state.settings.apiCfg || {};
     if (aiChannelTagEl) {
       aiChannelTagEl.textContent = channel === 'browser' ? 'DeepSeek 浏览器' : '自定义接口';
     }
@@ -770,7 +770,7 @@
 
         <div class="bn-about">
           <div class="bn-about-divider"></div>
-          <div class="bn-about-version">BiliSumi <span id="bn-version"></span></div>
+          <div class="bn-about-version">BiliSummary <span id="bn-version"></span></div>
           <a class="bn-about-link" href="https://github.com/guobaren/BiliSummary/releases" target="_blank">GitHub Releases ↗</a>
         </div>
       </div>
@@ -792,18 +792,18 @@
     // 字体大小
     panelEl.querySelectorAll('input[name="bn-fontSize"]').forEach(r => {
       r.addEventListener('change', () => {
-        window.BiViNote.state.settings.fontSize = r.value;
+        window.BiliSummary.state.settings.fontSize = r.value;
         applyDisplaySettings();
-        window.BiViNote.settings.save();
+        window.BiliSummary.settings.save();
       });
     });
 
     // 行高
     panelEl.querySelectorAll('input[name="bn-lineHeight"]').forEach(r => {
       r.addEventListener('change', () => {
-        window.BiViNote.state.settings.lineHeight = r.value;
+        window.BiliSummary.state.settings.lineHeight = r.value;
         applyDisplaySettings();
-        window.BiViNote.settings.save();
+        window.BiliSummary.settings.save();
       });
     });
 
@@ -811,8 +811,8 @@
     const autoScrollEl = panelEl.querySelector('#bn-auto-scroll');
     if (autoScrollEl) {
       autoScrollEl.addEventListener('change', () => {
-        window.BiViNote.state.settings.autoScroll = autoScrollEl.checked;
-        window.BiViNote.settings.save();
+        window.BiliSummary.state.settings.autoScroll = autoScrollEl.checked;
+        window.BiliSummary.settings.save();
       });
     }
 
@@ -820,10 +820,10 @@
     const darkModeEl = panelEl.querySelector('#bn-dark-mode');
     if (darkModeEl) {
       darkModeEl.addEventListener('change', () => {
-        window.BiViNote.state.settings.darkMode = darkModeEl.checked;
+        window.BiliSummary.state.settings.darkMode = darkModeEl.checked;
         const theme = darkModeEl.checked ? 'dark' : '';
         panelEl.setAttribute('data-bn-theme', theme);
-        window.BiViNote.settings.save();
+        window.BiliSummary.settings.save();
       });
     }
 
@@ -841,7 +841,7 @@
       const editorEl = document.getElementById('bn-settings-editor');
       const textarea = document.getElementById('bn-editor-textarea');
       const backBtn = document.getElementById('bn-editor-back');
-      const stored = window.BiViNote.state.settings[info.key];
+      const stored = window.BiliSummary.state.settings[info.key];
       if (mainEl) mainEl.style.display = 'none';
       if (editorEl) editorEl.style.display = '';
       if (textarea) textarea.value = stored || getDefaultAiPrompt();
@@ -875,8 +875,8 @@
       const info = PROMPT_MAP[editingType];
       const textarea = document.getElementById('bn-editor-textarea');
       if (info && textarea) {
-        window.BiViNote.state.settings[info.key] = textarea.value;
-        window.BiViNote.settings.save();
+        window.BiliSummary.state.settings[info.key] = textarea.value;
+        window.BiliSummary.settings.save();
         showToast('已保存');
       }
       closeEditor();
@@ -888,9 +888,9 @@
       const info = PROMPT_MAP[editingType];
       const textarea = document.getElementById('bn-editor-textarea');
       if (info && textarea) {
-        window.BiViNote.state.settings[info.key] = '';
+        window.BiliSummary.state.settings[info.key] = '';
         textarea.value = getDefaultAiPrompt();
-        window.BiViNote.settings.save();
+        window.BiliSummary.settings.save();
         showToast('已重置为默认提示词');
       }
     });
@@ -899,7 +899,7 @@
     const resetBtn = panelEl.querySelector('#bn-reset-btn');
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {
-        window.BiViNote.settings.resetDefaults();
+        window.BiliSummary.settings.resetDefaults();
         loadSettingsToUI();
         applyDisplaySettings();
         panelEl.setAttribute('data-bn-theme', '');
@@ -913,8 +913,8 @@
       langSelect.addEventListener('change', () => {
         const url = langSelect.value;
         const lang = langSelect.options[langSelect.selectedIndex]?.dataset?.lang || '';
-        if (url && window.BiViNote.subtitle) {
-          window.BiViNote.subtitle.switchSubtitle(url, lang);
+        if (url && window.BiliSummary.subtitle) {
+          window.BiliSummary.subtitle.switchSubtitle(url, lang);
         }
       });
     }
@@ -933,8 +933,8 @@
     const streamEl = panelEl.querySelector('#bn-api-stream');
 
     // 加载已保存的值
-    const cfg = window.BiViNote.state.settings.apiCfg || {};
-    const savedChannel = window.BiViNote.state.settings.aiChannel || 'browser';
+    const cfg = window.BiliSummary.state.settings.apiCfg || {};
+    const savedChannel = window.BiliSummary.state.settings.aiChannel || 'browser';
     const browserRadio = panelEl.querySelector('#bn-as-browser');
     const apiRadio = panelEl.querySelector('#bn-as-api');
     if (browserRadio && apiRadio) {
@@ -944,8 +944,8 @@
     // AI 总结「自定义接口」通道选择
     panelEl.querySelectorAll('input[name="bn-ai-channel-setting"]').forEach(r => {
       r.addEventListener('change', () => {
-        window.BiViNote.state.settings.aiChannel = r.value;
-        window.BiViNote.settings.save();
+        window.BiliSummary.state.settings.aiChannel = r.value;
+        window.BiliSummary.settings.save();
       });
     });
 
@@ -961,8 +961,8 @@
         model: modelInput.value.trim(),
         stream: streamEl.checked,
       };
-      window.BiViNote.state.settings.apiCfg = newCfg;
-      window.BiViNote.settings.save();
+      window.BiliSummary.state.settings.apiCfg = newCfg;
+      window.BiliSummary.settings.save();
     }
 
     // endpoint / key / model / stream 变化自动保存
@@ -993,7 +993,7 @@
         fetchBtn.textContent = '获取中…';
         apiStatus.textContent = '';
         try {
-          const models = await window.BiViNote.apiAI.fetchModels(epEl.value.trim(), keyEl.value.trim());
+          const models = await window.BiliSummary.apiAI.fetchModels(epEl.value.trim(), keyEl.value.trim());
           if (!models || models.length === 0) {
             apiStatus.textContent = '该接口未返回模型列表';
             fetchBtn.disabled = false;
@@ -1064,7 +1064,7 @@ UP主信息：提取作者名称。
   // ── 加载设置到 UI ──
 
   function loadSettingsToUI() {
-    const s = window.BiViNote.state.settings;
+    const s = window.BiliSummary.state.settings;
     const setRadio = (name, value) => {
       const r = panelEl.querySelector(`input[name="${name}"][value="${value}"]`);
       if (r) r.checked = true;
@@ -1103,7 +1103,7 @@ UP主信息：提取作者名称。
 
   function applyDisplaySettings() {
     if (!panelEl) return;
-    const s = window.BiViNote.state.settings;
+    const s = window.BiliSummary.state.settings;
     const sizeMap = { small: '12px', default: '13px', medium: '14px', large: '15px' };
     const lineMap = { narrow: '1.4', standard: '1.5', wide: '1.8' };
     panelEl.style.setProperty('--bn-font-size', sizeMap[s.fontSize] || '13px');
@@ -1113,7 +1113,7 @@ UP主信息：提取作者名称。
   // ── 标签页切换 ──
 
   function switchTab(tabId) {
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
     s.activeTab = tabId;
 
     tabs.forEach(t => {
@@ -1170,11 +1170,11 @@ UP主信息：提取作者名称。
     if (!btn) return;
     const action = btn.dataset.action;
     if (action === 'refresh') {
-      if (window.BiViNote.subtitle) window.BiViNote.subtitle.refresh();
+      if (window.BiliSummary.subtitle) window.BiliSummary.subtitle.refresh();
     } else if (action === 'copy') {
-      if (window.BiViNote.subtitle) window.BiViNote.subtitle.copyText();
+      if (window.BiliSummary.subtitle) window.BiliSummary.subtitle.copyText();
     } else if (action === 'export-srt') {
-      if (window.BiViNote.exportUtil) window.BiViNote.exportUtil.downloadSrt();
+      if (window.BiliSummary.exportUtil) window.BiliSummary.exportUtil.downloadSrt();
     }
   }
 
@@ -1183,30 +1183,30 @@ UP主信息：提取作者名称。
   function show() {
     if (!panelEl) createPanel();
     panelEl.classList.remove('bn-hidden');
-    window.BiViNote.state.panelVisible = true;
-    if (window.BiViNote.floatIcon?.hide) window.BiViNote.floatIcon.hide();
+    window.BiliSummary.state.panelVisible = true;
+    if (window.BiliSummary.floatIcon?.hide) window.BiliSummary.floatIcon.hide();
     loadSettingsToUI();
     applyDisplaySettings();
     // 自动加载字幕
-    const s = window.BiViNote.state;
-    const currentBvid = window.BiViNote.subtitle?.extractBvid(location.href) || '';
-    const currentPage = window.BiViNote.subtitle?.extractPageIndex(location.href) || 1;
-    if (window.BiViNote.subtitle && (!s.bvid || s.bvid !== currentBvid || currentPage !== (s.pageIndex || 1))) {
-      window.BiViNote.subtitle.refresh();
+    const s = window.BiliSummary.state;
+    const currentBvid = window.BiliSummary.subtitle?.extractBvid(location.href) || '';
+    const currentPage = window.BiliSummary.subtitle?.extractPageIndex(location.href) || 1;
+    if (window.BiliSummary.subtitle && (!s.bvid || s.bvid !== currentBvid || currentPage !== (s.pageIndex || 1))) {
+      window.BiliSummary.subtitle.refresh();
     }
   }
 
   function hide() {
     if (panelEl) {
       panelEl.classList.add('bn-hidden');
-      window.BiViNote.state.panelVisible = false;
+      window.BiliSummary.state.panelVisible = false;
     }
     stopAiLoginPoll();
-    if (window.BiViNote.floatIcon?.update) window.BiViNote.floatIcon.update();
+    if (window.BiliSummary.floatIcon?.update) window.BiliSummary.floatIcon.update();
   }
 
   function toggle() {
-    if (window.BiViNote.state.panelVisible) hide();
+    if (window.BiliSummary.state.panelVisible) hide();
     else show();
   }
 
@@ -1285,7 +1285,7 @@ UP主信息：提取作者名称。
 
   // ── 公开接口 ──
 
-  window.BiViNote.panel = {
+  window.BiliSummary.panel = {
     create: createPanel,
     show,
     hide,

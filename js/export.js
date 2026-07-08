@@ -1,11 +1,11 @@
 /**
- * BiViNote Export Module
+ * BiliSummary Export Module
  * 精简版：只保留 SRT 导出
  */
 (function () {
   'use strict';
 
-  window.BiViNote = window.BiViNote || {};
+  window.BiliSummary = window.BiliSummary || {};
 
   // ── SRT 导出 ──
 
@@ -32,8 +32,8 @@
   }
 
   function downloadSrt() {
-    const s = window.BiViNote.state;
-    const panel = window.BiViNote.panel;
+    const s = window.BiliSummary.state;
+    const panel = window.BiliSummary.panel;
 
     if (!s.subtitleBody || s.subtitleBody.length === 0) {
       panel.showToast('没有可导出的字幕');
@@ -68,7 +68,7 @@
       .slice(0, 100);
   }
 
-  window.BiViNote.exportUtil = {
+  window.BiliSummary.exportUtil = {
     buildSrt,
     downloadSrt,
   };

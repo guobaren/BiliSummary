@@ -1,16 +1,16 @@
 /**
- * BiViNote Chapter Module
+ * BiliSummary Chapter Module
  * 章节获取、解析、渲染（精简版：移除截图相关）
  */
 (function () {
   'use strict';
 
-  window.BiViNote = window.BiViNote || {};
+  window.BiliSummary = window.BiliSummary || {};
 
   let chapterListenerAttached = false;
 
   function render() {
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
     const container = document.getElementById('bn-chapter-list');
     if (!container) return;
 
@@ -53,19 +53,19 @@
     const row = btn.closest('.bn-row');
     if (!row) return;
     const index = parseInt(row.dataset.index);
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
     const item = s.chapters[index];
     if (!item) return;
 
     if (btn.dataset.action === 'copy') {
       navigator.clipboard.writeText(item.title).then(() => {
-        window.BiViNote.panel.showToast('已复制');
+        window.BiliSummary.panel.showToast('已复制');
       });
     }
   }
 
   function jumpToChapter(seconds) {
-    const video = window.BiViNote.subtitle?.getVideoElement();
+    const video = window.BiliSummary.subtitle?.getVideoElement();
     if (!video) return;
     const wasPaused = video.paused;
     video.currentTime = seconds;
@@ -93,7 +93,7 @@
       .replaceAll('"', '&quot;');
   }
 
-  window.BiViNote.chapter = {
+  window.BiliSummary.chapter = {
     render,
     jumpToChapter,
     formatTime

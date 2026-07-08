@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.0] - 2026-07-09
 
 ### Added
 - 新增通用 AI API 通道（OpenAI 兼容协议），支持自定义 Endpoint/API Key/模型

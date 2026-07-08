@@ -1,11 +1,11 @@
 /**
- * BiViNote Subtitle Module
+ * BiliSummary Subtitle Module
  * 字幕获取、解析、渲染、高亮同步（精简版：移除截图相关）
  */
 (function () {
   'use strict';
 
-  window.BiViNote = window.BiViNote || {};
+  window.BiliSummary = window.BiliSummary || {};
 
   let syncTimer = null;
 
@@ -92,8 +92,8 @@
   // ── 刷新（主流程） ──
 
   async function refresh() {
-    const s = window.BiViNote.state;
-    const panel = window.BiViNote.panel;
+    const s = window.BiliSummary.state;
+    const panel = window.BiliSummary.panel;
 
     const newBvid = extractBvid(location.href);
     if (!newBvid) {
@@ -157,7 +157,7 @@
       panel.showToast('字幕获取成功');
     } catch (err) {
       if (runId !== s.fetchRunId) return;
-      console.error('[BiViNote] refresh error:', err);
+      console.error('[BiliSummary] refresh error:', err);
       panel.showToast('获取失败：' + err.message);
     }
   }
@@ -165,8 +165,8 @@
   // ── 加载字幕正文 ──
 
   async function loadSubtitle(url, lang) {
-    const s = window.BiViNote.state;
-    const panel = window.BiViNote.panel;
+    const s = window.BiliSummary.state;
+    const panel = window.BiliSummary.panel;
     const runId = s.fetchRunId;
 
     try {
@@ -179,7 +179,7 @@
       startSync();
     } catch (err) {
       if (runId !== s.fetchRunId) return;
-      console.error('[BiViNote] loadSubtitle error:', err);
+      console.error('[BiliSummary] loadSubtitle error:', err);
       panel.showToast('字幕加载失败：' + err.message);
     }
   }
@@ -196,7 +196,7 @@
   let subtitleListenerAttached = false;
 
   function renderSubtitleList() {
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
     const container = document.getElementById('bn-subtitle-list');
     if (!container) return;
 
@@ -278,7 +278,7 @@
     const video = getVideoElement();
     if (!video) return;
 
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
     const container = document.getElementById('bn-subtitle-list');
     if (!container) return;
 
@@ -326,7 +326,7 @@
   }
 
   function findActiveIndex(currentTime) {
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
     if (!s.subtitleBody || s.subtitleBody.length === 0) return -1;
     for (let i = s.subtitleBody.length - 1; i >= 0; i--) {
       if (currentTime >= s.subtitleBody[i].from) return i;
@@ -347,27 +347,27 @@
   // ── 复制单条字幕 ──
 
   function copySingleText(index) {
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
     const item = s.subtitleBody[index];
     if (!item) return;
     navigator.clipboard.writeText(item.content).then(() => {
-      window.BiViNote.panel.showToast('已复制');
+      window.BiliSummary.panel.showToast('已复制');
     });
   }
 
   // ── 复制全部字幕文本 ──
 
   function copyText() {
-    const s = window.BiViNote.state;
+    const s = window.BiliSummary.state;
     if (!s.subtitleBody || s.subtitleBody.length === 0) {
-      window.BiViNote.panel.showToast('没有可复制的字幕');
+      window.BiliSummary.panel.showToast('没有可复制的字幕');
       return;
     }
     const text = s.subtitleBody
       .map(item => item.content)
       .join('\n');
     navigator.clipboard.writeText(text).then(() => {
-      window.BiViNote.panel.showToast('已复制全部字幕');
+      window.BiliSummary.panel.showToast('已复制全部字幕');
     });
   }
 
@@ -390,7 +390,7 @@
 
   // ── 公开接口 ──
 
-  window.BiViNote.subtitle = {
+  window.BiliSummary.subtitle = {
     refresh,
     switchSubtitle,
     copyText,
