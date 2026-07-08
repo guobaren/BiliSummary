@@ -70,7 +70,7 @@
         }
       });
 
-      console.log('[BiliSummary] Initialized successfully');
+      console.log('[BiliSummary] v20260709-1 content script loaded');
     } catch (err) {
       console.error('[BiliSummary] Initialization failed:', err);
     }

@@ -2,6 +2,7 @@
  * BiliSummary Background Script (Service Worker)
  * 代理 Bilibili API 请求，处理 CORS，管理图标状态
  */
+console.log('[BiliSummary] SW loaded at', Date.now());
 
 // ── 图标状态管理 ──
 
@@ -172,6 +173,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     dsSseProcessors = {};
     dsSenderTabs = {};
+    dsPendingRequest = null;
     // 清除会话 ID，让下次总结创建新会话
     dsChatId = null;
     return false;
@@ -179,7 +181,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ds-send') {
     const requestId = message.requestId || crypto.randomUUID();
-    dsHandleSend(message.markdown, message.prompt, requestId, message.chatId, message.mode);
+    // 用 sender.tab.id 替代 activeTabs.query，保证消息能回送到发送方
+    if (sender.tab?.id) dsSenderTabs[requestId] = sender.tab.id;
+    // 防止并发：上一轮未完成时丢弃新请求
+    if (dsPendingRequest) {
+      console.log('[BiliSummary] drop duplicate ds-send, pending:', dsPendingRequest);
+      sendResponse({ ok: true, requestId, dropped: true });
+      return true;
+    }
+    dsPendingRequest = requestId;
+    dsHandleSend(message.markdown, message.prompt, requestId, message.chatId, message.mode).finally(() => {
+      if (dsPendingRequest === requestId) dsPendingRequest = null;
+    });
     sendResponse({ ok: true, requestId });
     return true;
   }
@@ -216,10 +229,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // ── DeepSeek bridge → bilibili tab 转发
   if (message.type === 'DEEPSEEK_CHUNK') {
+    // 调试：记录每个到达 SW 的 chunk（取前 80 字符）
+    const preview = typeof message.chunk === 'string' ? message.chunk.slice(0, 80) : String(message.chunk || '').slice(0, 80);
+    console.log('[BiliSummary] CHUNK-rcv:', preview.replace(/\n/g, '\\n'));
+    // 追踪日志：拦截 __trace__ 消息，不经过 SSE 处理器
+    if (message.chunk && message.chunk.includes('"__trace__"')) {
+      try {
+        const d = JSON.parse(message.chunk.replace(/^data:\s*/, '').trim());
+        if (d.__trace__) console.log('[BiliSummary] trace:', d.msg);
+      } catch {}
+      return false;
+    }
     const rid = message.requestId;
     if (!dsSseProcessors[rid]) dsSseProcessors[rid] = dsCreateSSEProcessor();
     const processor = dsSseProcessors[rid];
     const text = processor.processChunk(message.chunk);
+    if (!dsSseProcessors[rid]._chunkCount) dsSseProcessors[rid]._chunkCount = 0;
+    dsSseProcessors[rid]._chunkCount++;
     const chatId = processor.getChatId();
     const msgId = processor.getMessageId();
     if (msgId) dsUpdateLastMessageId(msgId);
@@ -274,6 +300,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const tail = processor.flush();
       const msgId = processor.getMessageId();
       if (msgId) dsUpdateLastMessageId(msgId);
+      console.log('[BiliSummary] DONE total chunks:', processor._chunkCount, 'tail:', !!tail, 'error:', processor._lastError || '');
+      // 存在业务错误（如模型繁忙）时转发错误而非完成信号
+      if (processor._lastError) {
+        const hint = processor._errorReason === 'expert_busy_use_default' ? '（专家模型繁忙，可切换为快速模式）' : '';
+        dsSendToBilibiliTab({ type: 'ds-error', error: processor._lastError + hint, requestId: rid });
+        delete dsSseProcessors[rid];
+        delete dsSenderTabs[rid];
+        return false;
+      }
       if (tail) dsSendToBilibiliTab({ type: 'ds-chunk', text: tail, requestId: rid });
       delete dsSseProcessors[rid];
     }
@@ -686,15 +721,27 @@ const DS_DEFAULT_PROMPT = `你是一个视频内容总结助手，根据用户�
 
 UP主信息：提取作者名称。
 
-核心观点概述：用1-2句话概括视频的核心主旨或UP主最想传达的观点。
+核心内容概述：用1-2句话概括视频的核心内容。观点类提炼核心主张，故事类概括事件梗概，教程类说明所学内容，测评类给出总体结论，资讯类交代事件概要。
 
-主要内容分点整理：按章节或主题分点整理。每个大点需有明确的小标题（如"1. 安装与登录"），小标题下使用简洁的要点或短句展开说明。保留所有技术名词、工具名、框架名、产品名。删除口语化内容、重复内容，修正错别字，合并连续字幕为连贯语句。
+主要内容分点整理：根据视频内容的性质，选择对应的组织方式：
+
+- **观点/态度类**（UP主在表达个人看法、价值判断、经验教训、主观评价）：以**论点-论据**结构呈现。先写出一个明确的**论点**（一句话概括UP主想传达的观点），再以**论据：** 开头，用短横线"-"列出支撑该论点的原文具体细节或事例。论据需紧扣论点，每个论点的论据不超过5条。
+
+- **故事/经历类**（UP主在讲述个人经历、事件经过、生活记录、vlog）：以**情节脉络**形式呈现。按"起因 → 经过 → 转折 → 结果 → 感悟"的顺序梳理关键节点，每个节点用简洁语句概括核心情节，保留原文的叙事逻辑和情感变化线索。
+
+- **知识/教程类**（UP主在讲解客观事实、操作步骤、概念原理、技能方法）：以**总结**形式呈现。每个分点以一个小标题概括主题，下方用简洁的短句总结关键信息点。保留所有技术名词、工具名、框架名、产品名。
+
+- **测评/对比类**（UP主在对产品、服务、作品进行评测或多方对比）：以**维度分析**形式呈现。先列出评测维度，每个维度下用短横线"-"列出各产品的优缺点或具体表现，最后可附总体结论或推荐建议。
+
+- **新闻/资讯类**（UP主在报道或转述新闻事件、行业动态、政策变化）：以**事件要素**形式呈现。按"事件概述 → 关键细节 → 背景/原因 → 影响/后续"的结构整理，突出时间、地点、主体、事件、原因等核心要素。
+
+同一视频可能混合多种内容类型，请分别判断每部分属于哪一类，使用对应格式组织。
 
 额外约束：
 
 不要新增原文不存在的技术细节或扩展知识，仅整理原文信息。
 
-每个知识点下可包含子要点（使用短横线"-"或编号），但总层级不超过两级。
+删除口语化内容、重复内容，修正错别字，合并连续字幕为连贯语句。
 
 待总结字幕：
 
@@ -707,6 +754,7 @@ let dsChatId = null;
 let dsSseProcessors = {};
 let dsLastMessageId = null;
 let dsSenderTabs = {};
+let dsPendingRequest = null;
 let dsAbortController = null;
 let apiAbortController = null;
 
@@ -790,7 +838,27 @@ async function dsWaitTabComplete(tabId, timeout) {
 }
 
 async function dsInjectScripts(tabId) {
+  // 检测标签页上的代码版本，旧版本有重复 handler bug，需要重载
+  let needsReload = false;
+  try {
+    const vr = await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => (window).__deepseekApiVersion || null });
+    const version = vr?.[0]?.result;
+    if (version && version !== 'v20260709-5') {
+      console.log('[BiliSummary] dsInjectScripts: stale version', version, '→ reloading tab', tabId);
+      needsReload = true;
+    }
+  } catch {}
+  if (needsReload) {
+    dsInjectedTabs.delete(tabId);
+    chrome.tabs.reload(tabId);
+    await dsWaitTabComplete(tabId, 15000);
+  }
+
   if (dsInjectedTabs.has(tabId)) return;
+  // 清除旧版本的注入防护标记，确保新代码 IIFE 能够执行
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', func: () => { delete (window).__deepseekApiInjected; } });
+  } catch {}
   await chrome.scripting.executeScript({ target: { tabId }, world: 'ISOLATED', files: ['libs/deepseek-bridge.js'] });
   await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['libs/wasm-solver.js'] });
   await chrome.scripting.executeScript({ target: { tabId }, world: 'MAIN', files: ['libs/deepseek-api.js'] });
@@ -876,10 +944,9 @@ function dsSendToBilibiliTab(msg) {
 
 async function dsHandleSend(markdown, prompt, requestId, senderChatId, mode) {
   await dsEnsureStorageLoaded();
-  delete dsSenderTabs[requestId];
+  console.log('[BiliSummary] v20260709-1 dsHandleSend start', { requestId, senderChatId, mode, hasPrompt: !!prompt, hasMarkdown: !!markdown });
 
-  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (activeTabs[0]?.id) dsSenderTabs[requestId] = activeTabs[0].id;
+  // dsSenderTabs[requestId] 已在 ds-send 消息处理器中通过 sender.tab.id 设置
 
   // 如果 deepseek.js 传来了本地 chatId（可能与后台不同步），优先使用并持久化
   if (senderChatId && senderChatId !== dsChatId) {
@@ -894,6 +961,8 @@ async function dsHandleSend(markdown, prompt, requestId, senderChatId, mode) {
     fullPrompt = markdown;
     parentMessageId = dsLastMessageId;
   } else {
+    // 新总结：清除旧会话 ID，让 deepseek-api.js 创建全新会话
+    dsChatId = null;
     dsLastMessageId = null;
     try {
       const stored = await chrome.storage.local.get('bilisummary_settings');
@@ -910,23 +979,18 @@ async function dsHandleSend(markdown, prompt, requestId, senderChatId, mode) {
     }
   }
 
-  // 优先走直连通道（无需标签页），失败则回退到标签页注入
-  try {
-    await dsDirectSend(fullPrompt, dsChatId, requestId, parentMessageId, mode);
-    return; // 直连成功
-  } catch (directErr) {
-    if (!directErr.message || !directErr.message.startsWith('NEED_TAB_FALLBACK:')) {
-      // 非 PoW 回退的异常已经由 dsDirectSend 内部处理并 forward error，不重复报错
-      return;
-    }
-    // 不支持的 PoW 算法 → 回退到标签页注入
-    console.warn('[BiliSummary] 直连通道不支持 PoW 算法，回退到标签页模式:', directErr.message);
-  }
-
-  // ── 回退：标签页注入模式 ──
+  // ── 使用标签页注入模式 ──
   let tab;
+  let tabWasCreated = false;
   try {
-    tab = await dsEnsureTab();
+    const existingTabs = await chrome.tabs.query({ url: '*://chat.deepseek.com/*' });
+    if (existingTabs.length > 0 && existingTabs[0].id) {
+      tab = existingTabs[0];
+    } else {
+      tab = await chrome.tabs.create({ url: DS_URL, active: false });
+      await dsWaitTabComplete(tab.id, 20000);
+      tabWasCreated = true;
+    }
   } catch (e) {
     dsSendToBilibiliTab({ type: 'ds-error', error: `获取标签页失败: ${String(e)}`, requestId });
     return;
@@ -938,6 +1002,18 @@ async function dsHandleSend(markdown, prompt, requestId, senderChatId, mode) {
     dsSendToBilibiliTab({ type: 'ds-error', error: `注入脚本失败: ${String(e)}`, requestId });
     return;
   }
+
+  // 监听 DEEPSEEK_DONE/ERROR，请求完成后关闭临时标签页
+  function onTabMessage(msg, msgSender) {
+    if (msgSender.tab?.id !== tab.id) return;
+    if (msg.type === 'DEEPSEEK_DONE' || msg.type === 'DEEPSEEK_ERROR') {
+      chrome.runtime.onMessage.removeListener(onTabMessage);
+      if (tabWasCreated) {
+        setTimeout(() => chrome.tabs.remove(tab.id).catch(() => {}), 1000);
+      }
+    }
+  }
+  chrome.runtime.onMessage.addListener(onTabMessage);
 
   chrome.tabs.sendMessage(tab.id, {
     type: 'ds-inject-request',
@@ -975,6 +1051,11 @@ function dsCreateSSEProcessor() {
             dataLineBuf = '';
             if (data.type === 'deepseek:chat_session_id') { chatId = data.chat_session_id; continue; }
             if (data.response_message_id != null) messageId = data.response_message_id;
+            // 检测 API 业务错误（如模型繁忙等）
+            if (data.type === 'error' && data.content) {
+              this._lastError = data.content;
+              this._errorReason = data.finish_reason || '';
+            }
             const result = processEvent(data);
             if (result) text += result;
           } catch {
@@ -1247,9 +1328,11 @@ async function dsSolvePowDeepSeekHashV1(powChallenge) {
 async function dsDirectSend(prompt, chatId, requestId, parentMessageId, mode) {
   const forward = (msg) => dsSendToBilibiliTab({ ...msg, requestId });
   const thinkingEnabled = mode !== 'fast';
+  console.log('[BiliSummary] dsDirectSend begin', { chatId, parentMessageId, mode, promptLen: prompt?.length });
 
   try {
-    // 1. 获取 token
+    // 1. 获取 token（清除缓存确保每次都是新 token）
+    dsAuthToken = null;
     const token = await dsEnsureToken();
     if (!token) {
       forward({ type: 'ds-error', error: '未获取到 DeepSeek 认证 Token，请先登录 chat.deepseek.com' });
@@ -1258,7 +1341,7 @@ async function dsDirectSend(prompt, chatId, requestId, parentMessageId, mode) {
 
     const headers = {
       'Content-Type': 'application/json',
-      Accept: '*/*',
+      Accept: 'text/event-stream, */*',
       Referer: 'https://chat.deepseek.com/',
       Origin: 'https://chat.deepseek.com',
       'x-client-platform': 'web',
@@ -1368,6 +1451,16 @@ async function dsDirectSend(prompt, chatId, requestId, parentMessageId, mode) {
 
       // 6. 流式读取 SSE
       if (completionRes.ok && completionRes.body) {
+        const ct = completionRes.headers?.get('content-type') || '';
+        console.log('[BiliSummary] completion response', { status: completionRes.status, contentType: ct });
+
+        // 非 SSE 响应：尝试读取完整响应文本并输出（用于诊断）
+        if (!ct.includes('event-stream')) {
+          const text = await completionRes.text().catch(() => '');
+          console.log('[BiliSummary] non-SSE response body:', text.slice(0, 500));
+          if (text) forward({ type: 'ds-error', error: `响应格式异常: ${text.slice(0, 200)}` });
+          return;
+        }
         const reader = completionRes.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';

@@ -73,6 +73,7 @@
       chatId,
       requestId,
     });
+    console.log('[BiliSummary] ds-send sent', { requestId, chatId, mode, promptLen: prompt?.length, markdownLen: markdown?.length });
 
     setTimeout(() => {
       if (state === 'reading' || state === 'responding') {
@@ -87,7 +88,8 @@
       if (msg.requestId && msg.requestId !== activeRequestId) return;
       processChunk(msg.text, msg.chatId);
     } else if (msg.type === 'ds-done') {
-      if (msg.requestId && msg.requestId !== activeRequestId) return;
+      if (msg.requestId && msg.requestId !== activeRequestId) { console.log('[BiliSummary] ds-done filtered out', { msgRid: msg.requestId, activeRid: activeRequestId }); return; }
+      console.log('[BiliSummary] ds-done received', { requestId: msg.requestId, activeRequestId });
       flush();
       // 把本轮保存进历史，供下次追问时携带上下文
       history.push({ think: thinkText.trim(), response: responseText.trim() });
@@ -99,6 +101,7 @@
       emit('done', getResult());
     } else if (msg.type === 'ds-error') {
       if (msg.requestId && msg.requestId !== activeRequestId) return;
+      console.log('[BiliSummary] ds-error received', { error: msg.error });
       emit('error', msg.error);
       setState('error');
     }
@@ -161,12 +164,14 @@
     responseText = '';
     inThink = false;
     history = [];
+    chatId = null;
     setState('ready');
   }
 
   function abort() {
     chrome.runtime.sendMessage({ type: 'ds-abort' });
     activeRequestId = null;
+    try { chrome.storage.local.remove('chatId'); } catch {}
     clear();
   }
 

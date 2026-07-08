@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.1.0] - 2026-07-09
+
+### Added
+- 新增内容分类提示词模板：根据观点/故事/教程/测评/资讯自动适配总结格式
+- 新增并发请求防护（dsPendingRequest），重复点击自动丢弃
+- 新增 SSE 错误检测，模型繁忙等业务错误直接展示给用户
+- 新增 DEEPSEEK_CHUNK 调试追踪日志及 __trace__ 消息拦截
+- 新增标签页版本检测机制，旧代码版本自动重载
+- 新增临时标签页自动关闭：请求完成后清理 DeepSeek 标签页
+
+### Changed
+- 重构总结提示词，按 5 种内容类型分别定义结构化输出格式
+- dsHandleSend 由直连优先改为纯标签页注入模式
+- deepseek-api.js 每次创建全新会话而非复用旧会话
+- 重新设计会话 ID 提取逻辑：使用 biz_data.chat_session.id
+- 移除注入防重防护标记（改用 message handler 引用管理）
+- 更新 DeepSeek 页面版本号至 2.2.0 / 20250601.1
+
+### Fixed
+- 修复直连模式下偶发的 PoW 循环问题
+- 修复 ds-done 过滤条件导致的部分请求无响应
+- 修复 dsHandleSend 中 dsSenderTabs 设置时序（改为 sender.tab.id）
+- 修复 storage.local 中 chatId 残留导致下次总结使用过期会话
+
 ## [1.0.1] - 2026-07-09
 
 ### Changed

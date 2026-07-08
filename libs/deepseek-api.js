@@ -1,12 +1,10 @@
 // deepseek-api.js - DeepSeek API 核心逻辑（注入到 MAIN world）
 // 运行在 chat.deepseek.com 页面上下文中，可访问 localStorage 和页面 Cookie
+console.log("[DeepSeek Plugin] v20260709-5 loaded");
+window.__deepseekApiVersion = 'v20260709-5';
 
 (function () {
   "use strict";
-
-  // 防止重复注入
-  if (window.__deepseekApiInjected) return;
-  window.__deepseekApiInjected = true;
 
   // ========== 工具函数 ==========
 
@@ -110,8 +108,8 @@
 
   // 获取页面版本信息
   function getPageVersions() {
-    let clientVersion = "1.7.0";
-    let appVersion = "20241129.1";
+    let clientVersion = "2.2.0";
+    let appVersion = "20250601.1";
     try {
       const meta = document.querySelector('meta[name="version"]');
       if (meta && meta.getAttribute("content")) appVersion = meta.getAttribute("content");
@@ -140,8 +138,13 @@
 
   // ========== 核心：发送消息并流式接收回复 ==========
 
+  function trace(requestId, msg) {
+    postToExtension("DEEPSEEK_CHUNK", { requestId, chunk: `data: ${JSON.stringify({ __trace__: true, msg })}\n\n` });
+  }
+
   async function sendDeepSeekMessage(prompt, chatId, requestId, parentMessageId, thinkingEnabled) {
     try {
+      trace(requestId, "1-get-token");
       // 1. 获取 Token
       const token = getToken();
       if (!token) {
@@ -151,6 +154,7 @@
         });
         return;
       }
+      trace(requestId, "2-token-ok");
 
       // 构造请求头
       const { clientVersion, appVersion } = getPageVersions();
@@ -165,12 +169,13 @@
         Authorization: `Bearer ${token}`,
       };
 
-      // 2. 创建会话（如果没有 chatId）
-      let sessionId = chatId;
+      // 2. 创建会话（始终创建新会话）
+      let sessionId = null;
       let sessionInvalid = false;
       for (let retry = 0; retry <= 1; retry++) {
         sessionInvalid = false;
         if (!sessionId) {
+          trace(requestId, "3-create-session-start");
           try {
             const res = await fetchWithTimeout("https://chat.deepseek.com/api/v0/chat_session/create", {
               method: "POST",
@@ -187,6 +192,7 @@
               return;
             }
             const json = await res.json();
+            trace(requestId, "4-session-created-json");
             if (json.code !== undefined && json.code !== 0) {
               postToExtension("DEEPSEEK_ERROR", {
                 requestId,
@@ -194,9 +200,18 @@
               });
               return;
             }
-            const d = json.data;
-            const biz = d && typeof d === "object" ? d.biz_data : undefined;
-            sessionId = (biz && biz.id) || (d && d.id) || (d && d.chat_session_id) || "";
+            // 提取 chat_session.id，失败则报错
+            const rawData = json.data;
+            const rawSession = rawData && rawData.biz_data && rawData.biz_data.chat_session;
+            if (!rawSession || !rawSession.id) {
+              postToExtension("DEEPSEEK_ERROR", {
+                requestId,
+                error: "创建会话成功但响应格式异常，无 chat_session.id",
+              });
+              return;
+            }
+            sessionId = rawSession.id;
+            trace(requestId, "5-session-id-extracted");
           } catch (e) {
             const hint = e.name === "AbortError" ? "（请求超时）" : "";
             postToExtension("DEEPSEEK_ERROR", { requestId, error: `创建会话异常: ${String(e)}${hint}` });
@@ -204,6 +219,7 @@
           }
         }
 
+        trace(requestId, "6-pow-begin");
         // 3. 获取 PoW 挑战
         let powChallenge;
         try {
@@ -270,6 +286,7 @@
           postToExtension("DEEPSEEK_ERROR", { requestId, error: "PoW 求解失败，未找到答案" });
           return;
         }
+        trace(requestId, "7-pow-solved");
 
         // 5. 发送消息
         const powResponse = btoa(
@@ -282,17 +299,28 @@
 
         let response;
         try {
+          if (!sessionId) {
+            postToExtension("DEEPSEEK_ERROR", {
+              requestId,
+              error: `sessionId 为空，无法发送请求（sessionId=${typeof sessionId === 'string' ? sessionId : JSON.stringify(sessionId)}）`,
+            });
+            return;
+          }
+          const bodySessionId = String(sessionId);
+          trace(requestId, "8-completion-fetch-start sessionId=" + bodySessionId.slice(0, 12));
           response = await fetchWithTimeout("https://chat.deepseek.com/api/v0/chat/completion", {
             method: "POST",
             headers: { ...headers, "x-ds-pow-response": powResponse },
             credentials: "include",
             body: JSON.stringify({
-              chat_session_id: sessionId,
+              chat_session_id: bodySessionId,
               parent_message_id: parentMessageId || null,
+              ...(thinkingEnabled ? { model_type: "expert" } : {}),
               prompt,
               ref_file_ids: [],
               thinking_enabled: thinkingEnabled !== false,
               search_enabled: false,
+              action: null,
               preempt: false,
             }),
           }, 60000);
@@ -303,6 +331,7 @@
         }
 
         console.log("[DeepSeek Plugin] 收到响应, HTTP", response.status);
+        trace(requestId, "9-completion-response status=" + response.status);
         if (!response.ok) {
           const text = await response.text().catch(() => "");
           const hint =
@@ -437,9 +466,14 @@
     } catch {}
   }
 
+  // 移除旧的 message handler（如果存在），确保只有最新注入的代码处理请求
+  if (window.__deepseekApiMessageHandler) {
+    window.removeEventListener("message", window.__deepseekApiMessageHandler);
+  }
+
   // ========== 监听来自 content script 的消息 ==========
 
-  window.addEventListener("message", (event) => {
+  window.__deepseekApiMessageHandler = function (event) {
     if (event.source !== window) return;
     const msg = event.data;
     if (!msg) return;
@@ -450,5 +484,6 @@
     } else if (msg.type === "DEEPSEEK_ABORT") {
       stopStream(msg.chatId, msg.messageId);
     }
-  });
+  };
+  window.addEventListener("message", window.__deepseekApiMessageHandler);
 })();
