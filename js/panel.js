@@ -177,10 +177,6 @@
         <button id="bn-ai-stop" style="display:none">停止</button>
         <button id="bn-ai-copy" style="display:none">复制</button>
         <button id="bn-ai-clear" style="display:none">新对话</button>
-        <div class="bn-ai-mode-toggle">
-          <input type="radio" name="bn-ai-mode" id="bn-mode-fast" value="fast"><label for="bn-mode-fast">快速</label>
-          <input type="radio" name="bn-ai-mode" id="bn-mode-expert" value="expert" checked><label for="bn-mode-expert">专家</label>
-        </div>
       </div>
       <div class="bn-ai-input-row">
         <textarea id="bn-ai-input" placeholder="追问：输入后回车发送（Shift+Enter 换行）" rows="1"></textarea>
@@ -231,18 +227,6 @@
       }
     });
     aiSendBtn.addEventListener('click', onAiSend);
-
-    // 快速/专家模式切换
-    aiView.querySelectorAll('input[name="bn-ai-mode"]').forEach(r => {
-      r.addEventListener('change', () => {
-        window.BiliSummary.state.settings.aiMode = r.value;
-        window.BiliSummary.settings.save();
-      });
-    });
-    // 恢复已保存的模式
-    const savedMode = window.BiliSummary.state.settings.aiMode || 'expert';
-    const modeRadio = aiView.querySelector(`input[name="bn-ai-mode"][value="${savedMode}"]`);
-    if (modeRadio) modeRadio.checked = true;
 
     // 监听两个通道的事件
     bindAiBrowserChannelEvents();
@@ -749,6 +733,13 @@
           <input type="radio" name="bn-ai-channel-setting" id="bn-as-browser" value="browser">
           <div><div class="bn-radio-title">DeepSeek（浏览器 SDK）</div><div class="bn-radio-desc">登录 chat.deepseek.com 后使用；需安装并保持登录状态</div></div>
         </label>
+        <div class="bn-mode-row" id="bn-mode-row">
+          <span class="bn-mode-label">AI 模式</span>
+          <div class="bn-mode-toggle">
+            <input type="radio" name="bn-ai-mode" id="bn-mode-fast" value="fast"><label for="bn-mode-fast">快速</label>
+            <input type="radio" name="bn-ai-mode" id="bn-mode-expert" value="expert" checked><label for="bn-mode-expert">专家</label>
+          </div>
+        </div>
         <label class="bn-radio-line">
           <input type="radio" name="bn-ai-channel-setting" id="bn-as-api" value="api">
           <div><div class="bn-radio-title">自定义接口（OpenAI 兼容）</div><div class="bn-radio-desc">使用下面配置的 Endpoint / API Key / 模型，绕过浏览器 SDK 直接调用</div></div>
@@ -965,6 +956,17 @@
         window.BiliSummary.settings.save();
       });
     });
+    // AI 模式切换（DeepSeek 浏览器 SDK）
+    panelEl.querySelectorAll('input[name="bn-ai-mode"]').forEach(r => {
+      r.addEventListener('change', () => {
+        window.BiliSummary.state.settings.aiMode = r.value;
+        window.BiliSummary.settings.save();
+      });
+    });
+    // 恢复已保存的模式
+    const savedMode = window.BiliSummary.state.settings.aiMode || 'expert';
+    const modeRadio = panelEl.querySelector(`input[name="bn-ai-mode"][value="${savedMode}"]`);
+    if (modeRadio) modeRadio.checked = true;
 
     if (epEl) epEl.value = cfg.endpoint || 'https://api.deepseek.com/v1/chat/completions';
     if (keyEl) keyEl.value = cfg.apiKey || '';
@@ -1114,6 +1116,11 @@ UP主信息：提取作者名称。
       browserRadio.checked = (savedChannel === 'browser');
       apiRadio.checked = (savedChannel === 'api');
     }
+
+    // AI 模式
+    const savedMode = s.aiMode || 'expert';
+    const modeRadio = panelEl.querySelector(`input[name="bn-ai-mode"][value="${savedMode}"]`);
+    if (modeRadio) modeRadio.checked = true;
   }
 
   // ── 应用显示设置 ──
