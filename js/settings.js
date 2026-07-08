@@ -48,13 +48,13 @@ UP主信息：提取作者名称。
 
   async function load() {
     return new Promise(resolve => {
-      chrome.storage.local.get(['bivinote_settings'], result => {
+      chrome.storage.local.get(['bilisummary_settings'], result => {
         if (chrome.runtime.lastError) {
           console.warn('[BiliSummary] Storage load error:', chrome.runtime.lastError);
           resolve({ ...DEFAULTS });
           return;
         }
-        const saved = result.bivinote_settings || {};
+        const saved = result.bilisummary_settings || {};
         Object.assign(window.BiliSummary.state.settings, { ...DEFAULTS, ...saved });
         // 特殊处理 deepseekPrompt：如果 storage 里存的是空字符串（老版本遗留），
         // 说明用户未自定义，应恢复为默认提示词
@@ -76,7 +76,7 @@ UP主信息：提取作者名称。
     return new Promise(resolve => {
       const settings = window.BiliSummary.state.settings;
       chrome.storage.local.set({
-        bivinote_settings: { ...settings },
+        bilisummary_settings: { ...settings },
       }, () => {
         if (chrome.runtime.lastError) {
           console.warn('[BiliSummary] Storage save error:', chrome.runtime.lastError);

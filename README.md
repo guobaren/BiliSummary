@@ -24,7 +24,7 @@ BiliSummary 是一个 Chrome 扩展，在 B 站视频页抓取字幕并接入 AI
 
 ### Chrome / Edge
 
-1. 在 [Releases](https://github.com/guobaren/BiliSummary/releases) 下载最新 `bivinote-v*-chrome.zip`
+1. 在 [Releases](https://github.com/guobaren/BiliSummary/releases) 下载最新 `bilisummary-v*-chrome.zip`
 2. 解压到本地目录
 3. 打开扩展管理页：`chrome://extensions/` 或 `edge://extensions/`
 4. 开启"开发者模式"

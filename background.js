@@ -61,8 +61,8 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
 
 // 创建/更新右键菜单项
 function updateContextMenu() {
-  chrome.storage.local.get(["bivinote_settings"], (result) => {
-    const settings = result.bivinote_settings || {};
+  chrome.storage.local.get(["bilisummary_settings"], (result) => {
+    const settings = result.bilisummary_settings || {};
     const enabled = settings.floatIconEnabled !== false; // default true
     chrome.contextMenus.removeAll(() => {
       chrome.contextMenus.create({
@@ -81,10 +81,10 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "toggle-float-icon") {
     const enabled = info.checked;
     // 保存到 storage
-    chrome.storage.local.get(["bivinote_settings"], (result) => {
-      const settings = result.bivinote_settings || {};
+    chrome.storage.local.get(["bilisummary_settings"], (result) => {
+      const settings = result.bilisummary_settings || {};
       settings.floatIconEnabled = enabled;
-      chrome.storage.local.set({ bivinote_settings: settings }, () => {
+      chrome.storage.local.set({ bilisummary_settings: settings }, () => {
         // 通知所有 B站标签页更新
         chrome.tabs.query({ url: "*://*.bilibili.com/*" }, (tabs) => {
           tabs.forEach(t => {
@@ -894,8 +894,8 @@ async function dsHandleSend(markdown, prompt, requestId, senderChatId) {
   } else {
     dsLastMessageId = null;
     try {
-      const stored = await chrome.storage.local.get('bivinote_settings');
-      const savedSettings = stored.bivinote_settings || {};
+      const stored = await chrome.storage.local.get('bilisummary_settings');
+      const savedSettings = stored.bilisummary_settings || {};
       let sysPrompt = savedSettings.deepseekPrompt;
       if (!sysPrompt) sysPrompt = DS_DEFAULT_PROMPT;
       if (sysPrompt.includes('{markdown}')) {

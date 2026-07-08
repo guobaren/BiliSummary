@@ -108,8 +108,8 @@
    */
   function fetchModels(endpoint, apiKey) {
     return new Promise((resolve, reject) => {
-      chrome.storage.local.get('bivinote_api_cfg', (stored) => {
-        const cfg = stored.bivinote_api_cfg || {};
+      chrome.storage.local.get('bilisummary_api_cfg', (stored) => {
+        const cfg = stored.bilisummary_api_cfg || {};
         const merged = {
           endpoint: endpoint || cfg.endpoint || 'https://api.deepseek.com/v1/chat/completions',
           apiKey: apiKey || cfg.apiKey || '',

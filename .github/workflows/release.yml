@@ -27,7 +27,7 @@ jobs:
           cp manifest.json background.js content.js package/
           cp -r css js libs icons package/
           cd package
-          zip -r ../bivinote-v${{ steps.get_version.outputs.VERSION }}-chrome.zip *
+          zip -r ../bilisummary-v${{ steps.get_version.outputs.VERSION }}-chrome.zip *
 
       - name: Get Release Notes from CHANGELOG.md
         id: extract_notes
@@ -45,4 +45,4 @@ jobs:
           draft: false
           prerelease: false
           body: ${{ steps.extract_notes.outputs.NOTES }}
-          files: bivinote-v${{ steps.get_version.outputs.VERSION }}-chrome.zip
+          files: bilisummary-v${{ steps.get_version.outputs.VERSION }}-chrome.zip
