@@ -53,7 +53,7 @@
   // 对话历史（保留多轮）
   let history = [];
 
-  function sendMarkdown(markdown, prompt) {
+  function sendMarkdown(markdown, prompt, mode) {
     if (state === 'reading' || state === 'responding') return;
 
     // 不清空历史，仅保存本轮思考/回复占位
@@ -69,6 +69,7 @@
       type: 'ds-send',
       markdown,
       prompt,
+      mode: mode || 'expert',
       chatId,
       requestId,
     });

@@ -40,6 +40,7 @@ window.BiliSummary.state = {
     subtitleLang: '',
     deepseekPrompt: '',
     aiChannel: 'browser',   // 'browser' | 'api'
+    aiMode: 'expert',       // 'fast' | 'expert'
     floatIconEnabled: true, // 浮动图标常驻
     apiCfg: {
       endpoint: 'https://api.deepseek.com/v1/chat/completions',

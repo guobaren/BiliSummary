@@ -37,6 +37,7 @@ UP主信息：提取作者名称。
 
 直接输出整理后的内容，不要输出任何额外说明文字。`,
     aiChannel: 'browser',   // 'browser' | 'api'
+    aiMode: 'expert',       // 'fast' | 'expert'
     floatIconEnabled: true, // 浮动图标常驻
     apiCfg: {
       endpoint: 'https://api.deepseek.com/v1/chat/completions',

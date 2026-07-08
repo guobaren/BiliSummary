@@ -177,6 +177,10 @@
         <button id="bn-ai-stop" style="display:none">停止</button>
         <button id="bn-ai-copy" style="display:none">复制</button>
         <button id="bn-ai-clear" style="display:none">新对话</button>
+        <div class="bn-ai-mode-toggle">
+          <input type="radio" name="bn-ai-mode" id="bn-mode-fast" value="fast"><label for="bn-mode-fast">快速</label>
+          <input type="radio" name="bn-ai-mode" id="bn-mode-expert" value="expert" checked><label for="bn-mode-expert">专家</label>
+        </div>
       </div>
       <div class="bn-ai-input-row">
         <textarea id="bn-ai-input" placeholder="追问：输入后回车发送（Shift+Enter 换行）" rows="1"></textarea>
@@ -227,6 +231,18 @@
       }
     });
     aiSendBtn.addEventListener('click', onAiSend);
+
+    // 快速/专家模式切换
+    aiView.querySelectorAll('input[name="bn-ai-mode"]').forEach(r => {
+      r.addEventListener('change', () => {
+        window.BiliSummary.state.settings.aiMode = r.value;
+        window.BiliSummary.settings.save();
+      });
+    });
+    // 恢复已保存的模式
+    const savedMode = window.BiliSummary.state.settings.aiMode || 'expert';
+    const modeRadio = aiView.querySelector(`input[name="bn-ai-mode"][value="${savedMode}"]`);
+    if (modeRadio) modeRadio.checked = true;
 
     // 监听两个通道的事件
     bindAiBrowserChannelEvents();
@@ -531,7 +547,8 @@
       window.BiliSummary.deepseek.clear();
       const videoContext = buildAiVideoContext();
       const prompt = s.settings.deepseekPrompt || '';
-      window.BiliSummary.deepseek.sendMarkdown(videoContext, prompt);
+      const mode = s.settings.aiMode || 'expert';
+      window.BiliSummary.deepseek.sendMarkdown(videoContext, prompt, mode);
     } else {
       aiMessages = [
         { role: 'system', content: buildAiSystemPrompt() },

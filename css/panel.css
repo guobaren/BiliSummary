@@ -1038,6 +1038,32 @@
 }
 .bn-ai-actions button:hover { background: var(--bn-tab-active); }
 
+/* 快速/专家模式切换 */
+.bn-ai-mode-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+.bn-ai-mode-toggle input[type="radio"] {
+  display: none;
+}
+.bn-ai-mode-toggle label {
+  padding: 3px 8px;
+  font-size: 0.82em;
+  border: 1px solid var(--bn-btn-border);
+  background: var(--bn-btn-bg);
+  color: var(--bn-text-sub);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.15s, color 0.15s;
+}
+.bn-ai-mode-toggle input[type="radio"]:checked + label {
+  background: var(--bn-accent);
+  color: #fff;
+  border-color: var(--bn-accent);
+}
+
 .bn-ai-input-row {
   display: flex;
   gap: 6px;

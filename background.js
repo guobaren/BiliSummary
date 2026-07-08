@@ -177,7 +177,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ds-send') {
     const requestId = message.requestId || crypto.randomUUID();
-    dsHandleSend(message.markdown, message.prompt, requestId, message.chatId);
+    dsHandleSend(message.markdown, message.prompt, requestId, message.chatId, message.mode);
     sendResponse({ ok: true, requestId });
     return true;
   }
@@ -872,7 +872,7 @@ function dsSendToBilibiliTab(msg) {
   chrome.tabs.sendMessage(tabId, msg).catch(() => {});
 }
 
-async function dsHandleSend(markdown, prompt, requestId, senderChatId) {
+async function dsHandleSend(markdown, prompt, requestId, senderChatId, mode) {
   await dsEnsureStorageLoaded();
   delete dsSenderTabs[requestId];
 
@@ -910,7 +910,7 @@ async function dsHandleSend(markdown, prompt, requestId, senderChatId) {
 
   // 优先走直连通道（无需标签页），失败则回退到标签页注入
   try {
-    await dsDirectSend(fullPrompt, dsChatId, requestId, parentMessageId);
+    await dsDirectSend(fullPrompt, dsChatId, requestId, parentMessageId, mode);
     return; // 直连成功
   } catch (directErr) {
     if (!directErr.message || !directErr.message.startsWith('NEED_TAB_FALLBACK:')) {
@@ -939,7 +939,7 @@ async function dsHandleSend(markdown, prompt, requestId, senderChatId) {
 
   chrome.tabs.sendMessage(tab.id, {
     type: 'ds-inject-request',
-    payload: { prompt: fullPrompt, chatId: dsChatId, requestId, parentMessageId }
+    payload: { prompt: fullPrompt, chatId: dsChatId, requestId, parentMessageId, thinking_enabled: mode !== 'fast' }
   }).catch((e) => {
     if (String(e).includes('Receiving end does not exist')) {
       dsInjectedTabs.delete(tab.id);
@@ -1242,8 +1242,9 @@ async function dsSolvePowDeepSeekHashV1(powChallenge) {
 }
 
 // DeepSeek API 直连（无需持久标签页）
-async function dsDirectSend(prompt, chatId, requestId, parentMessageId) {
+async function dsDirectSend(prompt, chatId, requestId, parentMessageId, mode) {
   const forward = (msg) => dsSendToBilibiliTab({ ...msg, requestId });
+  const thinkingEnabled = mode !== 'fast';
 
   try {
     // 1. 获取 token
@@ -1348,7 +1349,7 @@ async function dsDirectSend(prompt, chatId, requestId, parentMessageId) {
           parent_message_id: parentMessageId || null,
           prompt,
           ref_file_ids: [],
-          thinking_enabled: true,
+          thinking_enabled: thinkingEnabled,
           search_enabled: false,
           preempt: false,
         }),
