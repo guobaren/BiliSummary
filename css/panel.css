@@ -358,6 +358,14 @@
   border-color: var(--bn-text);
 }
 
+/* 开关描述文字 */
+.bn-switch + .bn-switch-desc {
+  margin-top: -4px;
+}
+.bn-switch-desc {
+  font-size: 0.8em; color: var(--bn-text-sub); margin: 0 12px 10px; line-height: 1.4;
+}
+
 /* 开关 */
 .bn-switch {
   display: flex;

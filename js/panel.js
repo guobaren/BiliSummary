@@ -33,6 +33,7 @@
   let aiResultRaw = ''; // 累加原始 Markdown 文本
   let aiIsFollowUp = false;
   let aiThinkBufStarted = false; // 追问思考是否已加分隔符
+  let aiAutoStarted = false; // 自动总结是否已触发（防止重复）
 
   const TAB_DEFS = [
     { id: 'ai', label: 'AI 总结', footer: false },
@@ -542,6 +543,52 @@
     }
   }
 
+  function waitForSubtitles(cb) {
+    const s = window.BiliSummary.state;
+    if (s.subtitleBody?.length) { cb(); return; }
+    const start = Date.now();
+    const timer = setInterval(() => {
+      if (s.subtitleBody?.length) {
+        clearInterval(timer);
+        cb();
+      } else if (Date.now() - start > 15000) {
+        clearInterval(timer);
+      }
+    }, 300);
+  }
+
+  function autoSummarizeIfReady() {
+    const s = window.BiliSummary.state;
+    if (!s.settings.autoSummary) return;
+    if (aiAutoStarted) return;
+
+    const channel = s.settings.aiChannel || 'browser';
+
+    if (channel === 'browser') {
+      const ds = window.BiliSummary.deepseek;
+      if (!ds) return;
+      waitForSubtitles(() => {
+        if (aiAutoStarted) return;
+        ds.checkLogin().then((result) => {
+          if (!aiAutoStarted && result?.loggedIn && ds.getState() === 'ready' && s.subtitleBody?.length) {
+            aiAutoStarted = true;
+            startAiSummary();
+          }
+          refreshAiStatusUI();
+        });
+      });
+    } else {
+      const cfg = s.settings.apiCfg || {};
+      if (!cfg.apiKey || !cfg.endpoint || !cfg.model) return;
+      waitForSubtitles(() => {
+        if (!aiAutoStarted && s.subtitleBody?.length) {
+          aiAutoStarted = true;
+          startAiSummary();
+        }
+      });
+    }
+  }
+
   function sendAiApiMessages() {
     const cfg = window.BiliSummary.state.settings.apiCfg || {};
     window.BiliSummary.apiAI.sendToApi(aiMessages, {
@@ -726,6 +773,12 @@
           <input type="checkbox" id="bn-dark-mode">
           <label class="bn-switch-track" for="bn-dark-mode"></label>
         </div>
+        <div class="bn-switch">
+          <span>打开后自动总结</span>
+          <input type="checkbox" id="bn-auto-summary" checked>
+          <label class="bn-switch-track" for="bn-auto-summary"></label>
+        </div>
+        <div class="bn-switch-desc">开启后，打开面板时若 AI 通道已就绪（DeepSeek 已登录 / 自定义 API 已配置 Key 和模型），将自动开始总结。</div>
         <button class="bn-setting-btn" id="bn-reset-btn">恢复默认设置</button>
 
         <div class="bn-setting-label" style="margin-top:16px">AI 总结通道</div>
@@ -831,6 +884,15 @@
         window.BiliSummary.state.settings.darkMode = darkModeEl.checked;
         const theme = darkModeEl.checked ? 'dark' : '';
         panelEl.setAttribute('data-bn-theme', theme);
+        window.BiliSummary.settings.save();
+      });
+    }
+
+    // 打开后自动总结
+    const autoSummaryEl = panelEl.querySelector('#bn-auto-summary');
+    if (autoSummaryEl) {
+      autoSummaryEl.addEventListener('change', () => {
+        window.BiliSummary.state.settings.autoSummary = autoSummaryEl.checked;
         window.BiliSummary.settings.save();
       });
     }
@@ -1097,6 +1159,9 @@ UP主信息：提取作者名称。
     const darkModeEl = panelEl.querySelector('#bn-dark-mode');
     if (darkModeEl) darkModeEl.checked = s.darkMode;
 
+    const autoSummaryEl = panelEl.querySelector('#bn-auto-summary');
+    if (autoSummaryEl) autoSummaryEl.checked = s.autoSummary !== false;
+
     // 通用 API 配置
     const cfg = s.apiCfg || {};
     const epEl = panelEl.querySelector('#bn-api-endpoint');
@@ -1218,6 +1283,7 @@ UP主信息：提取作者名称。
     if (window.BiliSummary.subtitle && (!s.bvid || s.bvid !== currentBvid || currentPage !== (s.pageIndex || 1))) {
       window.BiliSummary.subtitle.refresh();
     }
+    autoSummarizeIfReady();
   }
 
   function hide() {

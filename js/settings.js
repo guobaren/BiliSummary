@@ -39,6 +39,7 @@ UP主信息：提取作者名称。
     aiChannel: 'browser',   // 'browser' | 'api'
     aiMode: 'expert',       // 'fast' | 'expert'
     floatIconEnabled: true, // 浮动图标常驻
+    autoSummary: true,      // 打开面板后自动开始总结
     apiCfg: {
       endpoint: 'https://api.deepseek.com/v1/chat/completions',
       apiKey: '',
