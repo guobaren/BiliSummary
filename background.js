@@ -171,6 +171,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     }
     dsSseProcessors = {};
+    dsSenderTabs = {};
     return false;
   }
 
@@ -182,18 +183,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'ds-open-login') {
-    const isStreaming = Object.keys(dsSseProcessors).length > 0;
+    // 用户主动点击登录，始终在前台打开
     chrome.tabs.query({ url: '*://chat.deepseek.com/*' }, (tabs) => {
-      if (isStreaming) {
-        // 流式处理中：不激活已有标签页，新建后台标签页避免中断 SSE 连接
-        chrome.tabs.create({ url: 'https://chat.deepseek.com', active: false }).catch(() => {});
-      } else if (tabs.length > 0) {
-        chrome.tabs.update(tabs[0].id, { active: true });
+      if (tabs.length > 0) {
+        chrome.tabs.update(tabs[0].id, { active: true }).catch(() => {});
       } else {
-        chrome.tabs.create({ url: 'https://chat.deepseek.com' });
+        chrome.tabs.create({ url: 'https://chat.deepseek.com' }).catch(() => {});
       }
     });
-    return false;
+    sendResponse({ ok: true });
+    return true;
   }
 
   if (message.type === 'ds-open-chat') {
@@ -231,9 +230,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'api-send') {
     (async () => {
       const cfg = {
-        endpoint: (message.endpoint || '').trim() || (await apiGetConfig()).endpoint,
-        apiKey: (message.apiKey || '').trim() || (await apiGetConfig()).apiKey,
-        model: (message.model || '').trim() || (await apiGetConfig()).model,
+        endpoint: (message.endpoint || '').trim(),
+        apiKey: (message.apiKey || '').trim(),
+        model: (message.model || '').trim(),
         stream: message.stream !== false,
       };
       apiStreamCompletion(message.messages, cfg, message.requestId);
@@ -243,15 +242,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'api-abort') {
-    // API 通道是一次性 fetch，无法中断；仅作占位
+    if (apiAbortController) {
+      apiAbortController.abort();
+      apiAbortController = null;
+    }
     return false;
   }
 
   if (message.type === 'api-fetch-models') {
     (async () => {
       const cfg = {
-        endpoint: (message.endpoint || '').trim() || (await apiGetConfig()).endpoint,
-        apiKey: (message.apiKey || '').trim() || (await apiGetConfig()).apiKey,
+        endpoint: (message.endpoint || '').trim(),
+        apiKey: (message.apiKey || '').trim(),
       };
       try {
         const models = await apiFetchModels(cfg);
@@ -261,18 +263,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     })();
     return true;
-  }
-
-  // ── DeepSeek bridge → bilibili tab 转发
-  if (message.type === 'DEEPSEEK_CHUNK') {
-    const rid = message.requestId;
-    if (!dsSseProcessors[rid]) dsSseProcessors[rid] = dsCreateSSEProcessor();
-    const processor = dsSseProcessors[rid];
-    const text = processor.processChunk(message.chunk);
-    const msgId = processor.getMessageId();
-    if (msgId) dsUpdateLastMessageId(msgId);
-    dsSendToBilibiliTab({ type: 'ds-chunk', text, requestId: rid, chatId: processor.getChatId() });
-    return false;
   }
 
   if (message.type === 'DEEPSEEK_DONE') {
@@ -286,12 +276,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       delete dsSseProcessors[rid];
     }
     dsSendToBilibiliTab({ type: 'ds-done', requestId: rid });
+    delete dsSenderTabs[rid];
     return false;
   }
 
   if (message.type === 'DEEPSEEK_ERROR') {
     delete dsSseProcessors[message.requestId];
     dsSendToBilibiliTab({ type: 'ds-error', error: message.error, requestId: message.requestId });
+    delete dsSenderTabs[message.requestId];
     return false;
   }
 });
@@ -548,20 +540,6 @@ function formatDate(timestamp) {
 // 走 background fetch 绕过 content_scripts 的 CORS 限制。
 // 兼容 OpenAI 风格：POST {messages[], model, stream?} -> SSE 或一次性 JSON
 
-function apiGetConfig() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get('bivinote_api_cfg', (stored) => {
-      const cfg = stored.bivinote_api_cfg || {};
-      resolve({
-        endpoint: (cfg.endpoint || 'https://api.deepseek.com/v1/chat/completions').trim(),
-        apiKey: cfg.apiKey || '',
-        model: cfg.model || 'deepseek-chat',
-        stream: cfg.stream !== false,     // 默认开启流式
-      });
-    });
-  });
-}
-
 async function apiStreamCompletion(messages, cfg, requestId) {
   const headers = {
     'Content-Type': 'application/json',
@@ -583,10 +561,12 @@ async function apiStreamCompletion(messages, cfg, requestId) {
   };
 
   try {
+    apiAbortController = new AbortController();
     const res = await fetch(cfg.endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),
+      signal: apiAbortController.signal,
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
@@ -652,7 +632,13 @@ async function apiStreamCompletion(messages, cfg, requestId) {
     }
     forward({ type: 'api-done' });
   } catch (err) {
+    if (err.name === 'AbortError') {
+      forward({ type: 'api-done' });
+      return;
+    }
     forward({ type: 'api-error', error: `请求异常: ${String(err)}` });
+  } finally {
+    apiAbortController = null;
   }
 }
 
@@ -718,8 +704,9 @@ let dsInjectedTabs = new Set();
 let dsChatId = null;
 let dsSseProcessors = {};
 let dsLastMessageId = null;
-let dsSenderTabId = null;
+let dsSenderTabs = {};
 let dsAbortController = null;
+let apiAbortController = null;
 
 // 持久化 DeepSeek chatId
 function dsUpdateChatId(newChatId) {
@@ -810,6 +797,10 @@ async function dsInjectScripts(tabId) {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   dsInjectedTabs.delete(tabId);
+  // 清理该标签页在 dsSenderTabs 中的条目
+  for (const [rid, tid] of Object.entries(dsSenderTabs)) {
+    if (tid === tabId) delete dsSenderTabs[rid];
+  }
   // 流式处理中被关闭 → 通知前端
   if (Object.keys(dsSseProcessors).length > 0) {
     // 检查是否有关联的 processor 使用了这个标签页
@@ -831,10 +822,41 @@ async function dsCheckLogin() {
       return { loggedIn: false };
     }
 
-    // 第 2 步：有 cookie → 尝试提取 token（含重试）
-    const token = await dsEnsureToken();
-    if (token) {
-      return { loggedIn: true };
+    // 第 2 步：有 cookie → 尝试提取 token
+    // 先尝试从已有标签页提取，失败则创建专用标签页重试
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const token = await dsEnsureToken();
+      if (token) {
+        return { loggedIn: true };
+      }
+      // 已有标签页提取失败，创建专用标签页重试（给 SPA 足够时间恢复会话）
+      if (attempt === 0) {
+        const tab = await chrome.tabs.create({ url: DS_URL, active: false }).catch(() => null);
+        if (tab?.id) {
+          await dsWaitTabComplete(tab.id, 25000);
+          const results = await chrome.scripting.executeScript({
+            target: { tabId: tab.id }, world: 'MAIN',
+            func: () => {
+              const keys = ['userToken', 'token', 'ds_token', 'auth_token', 'access_token', 'jwt'];
+              for (const key of keys) {
+                try {
+                  const raw = localStorage.getItem(key);
+                  if (raw && typeof raw === 'string' && raw.length > 10) {
+                    try { const p = JSON.parse(raw); const t = p.token || p.value || p.access_token || p.jwt; if (t && typeof t === 'string' && t.length > 10) return t; } catch { return raw; }
+                  }
+                } catch {}
+              }
+              return null;
+            },
+          }).catch(() => ({ result: null }));
+          if (results?.[0]?.result) {
+            dsAuthToken = results[0].result;
+            chrome.tabs.remove(tab.id).catch(() => {});
+            return { loggedIn: true };
+          }
+          chrome.tabs.remove(tab.id).catch(() => {});
+        }
+      }
     }
 
     // 第 3 步：token 提取失败 → 未登录（无 token 无法认证 API 请求）
@@ -845,16 +867,17 @@ async function dsCheckLogin() {
 }
 
 function dsSendToBilibiliTab(msg) {
-  if (!dsSenderTabId) return;
-  chrome.tabs.sendMessage(dsSenderTabId, msg).catch(() => {});
+  const tabId = msg.requestId ? dsSenderTabs[msg.requestId] : null;
+  if (!tabId) return;
+  chrome.tabs.sendMessage(tabId, msg).catch(() => {});
 }
 
 async function dsHandleSend(markdown, prompt, requestId, senderChatId) {
   await dsEnsureStorageLoaded();
-  dsSenderTabId = null;
+  delete dsSenderTabs[requestId];
 
   const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (activeTabs[0]?.id) dsSenderTabId = activeTabs[0].id;
+  if (activeTabs[0]?.id) dsSenderTabs[requestId] = activeTabs[0].id;
 
   // 如果 deepseek.js 传来了本地 chatId（可能与后台不同步），优先使用并持久化
   if (senderChatId && senderChatId !== dsChatId) {
@@ -1183,7 +1206,6 @@ function dsParsePowChallenge(respJson) {
 
 // DeepSeekHashV1 PoW 求解器（临时标签页 + WASM，求解后立即关闭）
 async function dsSolvePowDeepSeekHashV1(powChallenge) {
-  // 找现有 DeepSeek 标签页或创建临时标签页
   const tabs = await chrome.tabs.query({ url: '*://chat.deepseek.com/*' });
   let tab = tabs.length > 0 ? tabs[0] : null;
   let needCleanup = false;
@@ -1195,19 +1217,15 @@ async function dsSolvePowDeepSeekHashV1(powChallenge) {
   }
 
   try {
-    // 注入 WASM 求解器（如尚未注入）
     try {
       await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: 'MAIN',
+        target: { tabId: tab.id }, world: 'MAIN',
         files: ['libs/wasm-solver.js'],
       });
     } catch {}
 
-    // 在标签页中求解 PoW
     const results = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      world: 'MAIN',
+      target: { tabId: tab.id }, world: 'MAIN',
       func: (pc) => {
         if (typeof window.solvePowDeepSeekHashV1 !== 'function') return -1;
         return window.solvePowDeepSeekHashV1(pc).catch(() => -1);

@@ -142,270 +142,268 @@
 
   async function sendDeepSeekMessage(prompt, chatId, requestId, parentMessageId) {
     try {
-    const origin = window.location.origin;
+      // 1. 获取 Token
+      const token = getToken();
+      if (!token) {
+        postToExtension("DEEPSEEK_ERROR", {
+          requestId,
+          error: "未找到认证 Token，请先访问 https://chat.deepseek.com 并登录。",
+        });
+        return;
+      }
 
-    // 1. 获取 Token
-    const token = getToken();
-    if (!token) {
-      postToExtension("DEEPSEEK_ERROR", {
-        requestId,
-        error: "未找到认证 Token，请先访问 https://chat.deepseek.com 并登录。",
-      });
-      return;
-    }
+      // 构造请求头
+      const { clientVersion, appVersion } = getPageVersions();
+      const headers = {
+        "Content-Type": "application/json",
+        Accept: "*/*",
+        Referer: "https://chat.deepseek.com/",
+        Origin: "https://chat.deepseek.com",
+        "x-client-platform": "web",
+        "x-client-version": clientVersion,
+        "x-app-version": appVersion,
+        Authorization: `Bearer ${token}`,
+      };
 
-    // 构造请求头
-    const { clientVersion, appVersion } = getPageVersions();
-    const headers = {
-      "Content-Type": "application/json",
-      Accept: "*/*",
-      Referer: "https://chat.deepseek.com/",
-      Origin: "https://chat.deepseek.com",
-      "x-client-platform": "web",
-      "x-client-version": clientVersion,
-      "x-app-version": appVersion,
-      Authorization: `Bearer ${token}`,
-    };
+      // 2. 创建会话（如果没有 chatId）
+      let sessionId = chatId;
+      let sessionInvalid = false;
+      for (let retry = 0; retry <= 1; retry++) {
+        sessionInvalid = false;
+        if (!sessionId) {
+          try {
+            const res = await fetchWithTimeout("https://chat.deepseek.com/api/v0/chat_session/create", {
+              method: "POST",
+              headers,
+              credentials: "include",
+              body: JSON.stringify({}),
+            }, 15000);
+            if (!res.ok) {
+              const text = await res.text().catch(() => "");
+              postToExtension("DEEPSEEK_ERROR", {
+                requestId,
+                error: `创建会话失败: HTTP ${res.status} ${text.slice(0, 200)}`,
+              });
+              return;
+            }
+            const json = await res.json();
+            if (json.code !== undefined && json.code !== 0) {
+              postToExtension("DEEPSEEK_ERROR", {
+                requestId,
+                error: `创建会话错误: code=${json.code}, msg=${json.msg || "unknown"}`,
+              });
+              return;
+            }
+            const d = json.data;
+            const biz = d && typeof d === "object" ? d.biz_data : undefined;
+            sessionId = (biz && biz.id) || (d && d.id) || (d && d.chat_session_id) || "";
+          } catch (e) {
+            const hint = e.name === "AbortError" ? "（请求超时）" : "";
+            postToExtension("DEEPSEEK_ERROR", { requestId, error: `创建会话异常: ${String(e)}${hint}` });
+            return;
+          }
+        }
 
-    // 2. 创建会话（如果没有 chatId）
-    let sessionId = chatId;
-    let sessionInvalid = false;
-    for (let retry = 0; retry <= 1; retry++) {
-      sessionInvalid = false;
-    if (!sessionId) {
-      try {
-        const res = await fetchWithTimeout("https://chat.deepseek.com/api/v0/chat_session/create", {
-          method: "POST",
-          headers,
-          credentials: "include",
-          body: JSON.stringify({}),
-        }, 15000);
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
+        // 3. 获取 PoW 挑战
+        let powChallenge;
+        try {
+          const res = await fetchWithTimeout("https://chat.deepseek.com/api/v0/chat/create_pow_challenge", {
+            method: "POST",
+            headers,
+            credentials: "include",
+            body: JSON.stringify({ target_path: "/api/v0/chat/completion" }),
+          }, 15000);
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            postToExtension("DEEPSEEK_ERROR", {
+              requestId,
+              error: `获取 PoW 挑战失败: HTTP ${res.status} ${text.slice(0, 200)}`,
+            });
+            return;
+          }
+          const json = await res.json();
+          if (json.code !== undefined && json.code !== 0) {
+            postToExtension("DEEPSEEK_ERROR", {
+              requestId,
+              error: `PoW 挑战错误: code=${json.code}, msg=${json.msg || "unknown"}`,
+            });
+            return;
+          }
+          powChallenge = parsePowChallengeFull(json);
+          if (!powChallenge) {
+            postToExtension("DEEPSEEK_ERROR", {
+              requestId,
+              error: `PoW 挑战格式异常: ${JSON.stringify(Object.keys(json))}`,
+            });
+            return;
+          }
+        } catch (e) {
+          const hint = e.name === "AbortError" ? "（请求超时）" : "";
+          postToExtension("DEEPSEEK_ERROR", { requestId, error: `获取 PoW 异常: ${String(e)}${hint}` });
+          return;
+        }
+
+        // 4. 解决 PoW
+        console.log("[DeepSeek Plugin] PoW 算法:", powChallenge.algorithm, "难度:", powChallenge.difficulty);
+        let answer;
+        if (powChallenge.algorithm === "sha256") {
+          answer = await solvePowSha256(powChallenge.salt, powChallenge.challenge, powChallenge.difficulty);
+        } else if (powChallenge.algorithm === "DeepSeekHashV1") {
+          if (typeof window.solvePowDeepSeekHashV1 === "function") {
+            answer = await window.solvePowDeepSeekHashV1(powChallenge);
+          } else {
+            postToExtension("DEEPSEEK_ERROR", {
+              requestId,
+              error: "WASM 求解器未加载，请刷新页面后重试",
+            });
+            return;
+          }
+        } else {
           postToExtension("DEEPSEEK_ERROR", {
             requestId,
-            error: `创建会话失败: HTTP ${res.status} ${text.slice(0, 200)}`,
+            error: `不支持的 PoW 算法: ${powChallenge.algorithm}，仅支持 sha256 和 DeepSeekHashV1`,
           });
           return;
         }
-        const json = await res.json();
-        if (json.code !== undefined && json.code !== 0) {
+        console.log("[DeepSeek Plugin] PoW 答案:", answer);
+        if (!isFinite(answer) || answer < 0) {
+          postToExtension("DEEPSEEK_ERROR", { requestId, error: "PoW 求解失败，未找到答案" });
+          return;
+        }
+
+        // 5. 发送消息
+        const powResponse = btoa(
+          JSON.stringify({
+            ...powChallenge,
+            answer,
+            target_path: "/api/v0/chat/completion",
+          })
+        );
+
+        let response;
+        try {
+          response = await fetchWithTimeout("https://chat.deepseek.com/api/v0/chat/completion", {
+            method: "POST",
+            headers: { ...headers, "x-ds-pow-response": powResponse },
+            credentials: "include",
+            body: JSON.stringify({
+              chat_session_id: sessionId,
+              parent_message_id: parentMessageId || null,
+              prompt,
+              ref_file_ids: [],
+              thinking_enabled: true,
+              search_enabled: false,
+              preempt: false,
+            }),
+          }, 60000);
+        } catch (e) {
+          const hint = e.name === "AbortError" ? "（请求超时 60s）" : "";
+          postToExtension("DEEPSEEK_ERROR", { requestId, error: `发送消息异常: ${String(e)}${hint}` });
+          return;
+        }
+
+        console.log("[DeepSeek Plugin] 收到响应, HTTP", response.status);
+        if (!response.ok) {
+          const text = await response.text().catch(() => "");
+          const hint =
+            response.status === 401 || response.status === 403
+              ? " 请访问 https://chat.deepseek.com 重新登录。"
+              : "";
           postToExtension("DEEPSEEK_ERROR", {
             requestId,
-            error: `创建会话错误: code=${json.code}, msg=${json.msg || "unknown"}`,
+            error: `HTTP ${response.status}: ${response.statusText} ${text.slice(0, 300)}${hint}`,
           });
           return;
         }
-        const d = json.data;
-        const biz = d && typeof d === "object" ? d.biz_data : undefined;
-        sessionId = (biz && biz.id) || (d && d.id) || (d && d.chat_session_id) || "";
-      } catch (e) {
-        const hint = e.name === "AbortError" ? "（请求超时）" : "";
-        postToExtension("DEEPSEEK_ERROR", { requestId, error: `创建会话异常: ${String(e)}${hint}` });
-        return;
-      }
-    }
 
-    // 3. 获取 PoW 挑战
-    let powChallenge;
-    try {
-      const res = await fetchWithTimeout("https://chat.deepseek.com/api/v0/chat/create_pow_challenge", {
-        method: "POST",
-        headers,
-        credentials: "include",
-        body: JSON.stringify({ target_path: "/api/v0/chat/completion" }),
-      }, 15000);
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        postToExtension("DEEPSEEK_ERROR", {
-          requestId,
-          error: `获取 PoW 挑战失败: HTTP ${res.status} ${text.slice(0, 200)}`,
-        });
-        return;
-      }
-      const json = await res.json();
-      if (json.code !== undefined && json.code !== 0) {
-        postToExtension("DEEPSEEK_ERROR", {
-          requestId,
-          error: `PoW 挑战错误: code=${json.code}, msg=${json.msg || "unknown"}`,
-        });
-        return;
-      }
-      powChallenge = parsePowChallengeFull(json);
-      if (!powChallenge) {
-        postToExtension("DEEPSEEK_ERROR", {
-          requestId,
-          error: `PoW 挑战格式异常: ${JSON.stringify(Object.keys(json))}`,
-        });
-        return;
-      }
-    } catch (e) {
-      const hint = e.name === "AbortError" ? "（请求超时）" : "";
-      postToExtension("DEEPSEEK_ERROR", { requestId, error: `获取 PoW 异常: ${String(e)}${hint}` });
-      return;
-    }
-
-    // 4. 解决 PoW
-    console.log("[DeepSeek Plugin] PoW 算法:", powChallenge.algorithm, "难度:", powChallenge.difficulty);
-    let answer;
-    if (powChallenge.algorithm === "sha256") {
-      answer = await solvePowSha256(powChallenge.salt, powChallenge.challenge, powChallenge.difficulty);
-    } else if (powChallenge.algorithm === "DeepSeekHashV1") {
-      if (typeof window.solvePowDeepSeekHashV1 === "function") {
-        answer = await window.solvePowDeepSeekHashV1(powChallenge);
-      } else {
-        postToExtension("DEEPSEEK_ERROR", {
-          requestId,
-          error: "WASM 求解器未加载，请刷新页面后重试",
-        });
-        return;
-      }
-    } else {
-      postToExtension("DEEPSEEK_ERROR", {
-        requestId,
-        error: `不支持的 PoW 算法: ${powChallenge.algorithm}，仅支持 sha256 和 DeepSeekHashV1`,
-      });
-      return;
-    }
-    console.log("[DeepSeek Plugin] PoW 答案:", answer);
-    if (!isFinite(answer) || answer < 0) {
-      postToExtension("DEEPSEEK_ERROR", { requestId, error: "PoW 求解失败，未找到答案" });
-      return;
-    }
-
-    // 5. 发送消息
-    const powResponse = btoa(
-      JSON.stringify({
-        ...powChallenge,
-        answer,
-        target_path: "/api/v0/chat/completion",
-      })
-    );
-
-    let response;
-    try {
-      response = await fetchWithTimeout("https://chat.deepseek.com/api/v0/chat/completion", {
-        method: "POST",
-        headers: { ...headers, "x-ds-pow-response": powResponse },
-        credentials: "include",
-        body: JSON.stringify({
-          chat_session_id: sessionId,
-          parent_message_id: parentMessageId || null,
-          prompt,
-          ref_file_ids: [],
-          thinking_enabled: true,
-          search_enabled: false,
-          preempt: false,
-        }),
-      }, 60000);
-    } catch (e) {
-      const hint = e.name === "AbortError" ? "（请求超时 60s）" : "";
-      postToExtension("DEEPSEEK_ERROR", { requestId, error: `发送消息异常: ${String(e)}${hint}` });
-      return;
-    }
-
-    console.log("[DeepSeek Plugin] 收到响应, HTTP", response.status);
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      const hint =
-        response.status === 401 || response.status === 403
-          ? " 请访问 https://chat.deepseek.com 重新登录。"
-          : "";
-      postToExtension("DEEPSEEK_ERROR", {
-        requestId,
-        error: `HTTP ${response.status}: ${response.statusText} ${text.slice(0, 300)}${hint}`,
-      });
-      return;
-    }
-
-    // 6. 流式读取 SSE 响应
-    const reader = response.body ? response.body.getReader() : null;
-    if (!reader) {
-      postToExtension("DEEPSEEK_ERROR", { requestId, error: "响应体为空" });
-      return;
-    }
-
-    // 先发送会话 ID
-    postToExtension("DEEPSEEK_CHUNK", {
-      requestId,
-      chunk: `data: ${JSON.stringify({ type: "deepseek:chat_session_id", chat_session_id: sessionId })}\n\n`,
-    });
-
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let streamComplete = false;
-    let isFirstChunk = true;
-    for (;;) {
-      const readPromise = reader.read();
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("SSE 读取超时 (30s 无数据)")), 30000)
-      );
-      let done, value;
-      try {
-        ({ done, value } = await Promise.race([readPromise, timeoutPromise]));
-      } catch (e) {
-        // 超时或读取错误，标记不完整
-        postToExtension("DEEPSEEK_ERROR", { requestId, error: "响应中断：" + e.message });
-        break;
-      }
-      if (done) { streamComplete = true; break; }
-      buffer += decoder.decode(value, { stream: true });
-
-      // 首个 chunk 后检测是否为 JSON 错误（如会话失效）
-      if (isFirstChunk) {
-        isFirstChunk = false;
-        if (buffer.trimStart().startsWith("{") && buffer.includes("invalid chat session id")) {
-          sessionInvalid = true;
-          break;
+        // 6. 流式读取 SSE 响应
+        const reader = response.body ? response.body.getReader() : null;
+        if (!reader) {
+          postToExtension("DEEPSEEK_ERROR", { requestId, error: "响应体为空" });
+          return;
         }
-      }
-      while (buffer.includes("\n")) {
-        const idx = buffer.indexOf("\n");
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        if (line.startsWith("data: ")) {
-          // 检测无效会话
-          if (line.includes("invalid chat session id")) {
-            sessionInvalid = true;
+
+        // 先发送会话 ID
+        postToExtension("DEEPSEEK_CHUNK", {
+          requestId,
+          chunk: `data: ${JSON.stringify({ type: "deepseek:chat_session_id", chat_session_id: sessionId })}\n\n`,
+        });
+
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let streamComplete = false;
+        let isFirstChunk = true;
+        for (;;) {
+          const readPromise = reader.read();
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("SSE 读取超时 (30s 无数据)")), 30000)
+          );
+          let done, value;
+          try {
+            ({ done, value } = await Promise.race([readPromise, timeoutPromise]));
+          } catch (e) {
+            // 超时或读取错误，标记不完整
+            postToExtension("DEEPSEEK_ERROR", { requestId, error: "响应中断：" + e.message });
             break;
           }
-          postToExtension("DEEPSEEK_CHUNK", { requestId, chunk: line + "\n\n" });
+          if (done) { streamComplete = true; break; }
+          buffer += decoder.decode(value, { stream: true });
+
+          // 首个 chunk 后检测是否为 JSON 错误（如会话失效）
+          if (isFirstChunk) {
+            isFirstChunk = false;
+            if (buffer.trimStart().startsWith("{") && buffer.includes("invalid chat session id")) {
+              sessionInvalid = true;
+              break;
+            }
+          }
+          while (buffer.includes("\n")) {
+            const idx = buffer.indexOf("\n");
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (line.startsWith("data: ")) {
+              // 检测无效会话
+              if (line.includes("invalid chat session id")) {
+                sessionInvalid = true;
+                break;
+              }
+              postToExtension("DEEPSEEK_CHUNK", { requestId, chunk: line + "\n\n" });
+            }
+          }
         }
-      }
-    }
 
-    // 处理剩余缓冲（会话失效时跳过，避免将 JSON 错误体当 SSE 处理）
-    if (!sessionInvalid) {
-      const remaining = decoder.decode();
-      if (remaining) buffer += remaining;
-      while (buffer.includes("\n")) {
-        const idx = buffer.indexOf("\n");
-        const line = buffer.slice(0, idx).trim();
-        buffer = buffer.slice(idx + 1);
-        if (line.startsWith("data: ")) {
-          postToExtension("DEEPSEEK_CHUNK", { requestId, chunk: line + "\n\n" });
+        // 处理剩余缓冲（会话失效时跳过，避免将 JSON 错误体当 SSE 处理）
+        if (!sessionInvalid) {
+          const remaining = decoder.decode();
+          if (remaining) buffer += remaining;
+          while (buffer.includes("\n")) {
+            const idx = buffer.indexOf("\n");
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (line.startsWith("data: ")) {
+              postToExtension("DEEPSEEK_CHUNK", { requestId, chunk: line + "\n\n" });
+            }
+          }
+          const tail = buffer.trim();
+          if (tail.startsWith("data: ")) {
+            postToExtension("DEEPSEEK_CHUNK", { requestId, chunk: tail + "\n\n" });
+          }
         }
-      }
-      const tail = buffer.trim();
-      if (tail.startsWith("data: ")) {
-        postToExtension("DEEPSEEK_CHUNK", { requestId, chunk: tail + "\n\n" });
-      }
-    }
 
-    if (streamComplete) {
-      postToExtension("DEEPSEEK_DONE", { requestId });
-      break;
-    }
+        if (streamComplete) {
+          postToExtension("DEEPSEEK_DONE", { requestId });
+          break;
+        }
 
-    // 会话失效，清除 chatId 并重试
-    if (sessionInvalid && retry === 0) {
-      sessionId = null;
-      parentMessageId = null; // 新会话无 parent
-      postToExtension("DEEPSEEK_CHUNK", { requestId, chunk: "data: [会话已失效，正在重新创建...]\n\n" });
-      continue;
-    }
-    break;
-    } // end for retry
+        // 会话失效，清除 chatId 并重试
+        if (sessionInvalid && retry === 0) {
+          sessionId = null;
+          parentMessageId = null; // 新会话无 parent
+          postToExtension("DEEPSEEK_CHUNK", { requestId, chunk: "data: [会话已失效，正在重新创建...]\n\n" });
+          continue;
+        }
+        break;
+      } // end for retry
     } catch (e) {
       postToExtension("DEEPSEEK_ERROR", {
         requestId,

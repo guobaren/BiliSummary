@@ -1,49 +1,29 @@
 # Changelog
 
-## [2.2.0] - 2026-07-04
+## [Unreleased]
+
 ### Added
-- 新增 GitHub Pages 官方网站
-- 新增自动化发布工作流（GitHub Actions）
+- 新增通用 AI API 通道（OpenAI 兼容协议），支持自定义 Endpoint/API Key/模型
+- 新增 background.js Service Worker，接管 CORS 代理和 DeepSeek 直连通信
+- 新增右键菜单（浮动图标常驻开关）
+- 新增内容安全策略支持 WASM 运行
 
 ### Changed
-- 优化页面布局和图标设计
-- 统一背景颜色和视觉风格
-
-## [2.1.0] - 2026-07-02
-### Added
-- 新增 DeepSeek AI 文档整理功能
-- 新增多语言字幕支持
-- 新增章节信息抓取
+- 重构面板 UI：精简为三标签页（AI 总结 / 字幕 / 设置）
+- 移除截图功能及相关模块（capture.js、crop-viewer.js、cropper.js、jszip）
+- 移除视频信息页
+- 简化导出模块：仅保留 SRT 导出
+- 优化 subtitle/chapter/export 模块，移除截图相关代码
+- 锁定 host_permissions 为 B 站域名
 
 ### Fixed
-- 修复视频信息获取失败的问题
-
-## [2.0.0] - 2026-07-01
-### Added
-- 全新模块化架构重构
-- 新增截图裁剪和翻转功能
-- 新增 Markdown + 截图打包导出
-
-### Changed
-- 重构代码结构，提升可维护性
-
-## [1.3.0] - 2026-06-29
-### Added
-- 新增 SRT 字幕导出
-- 新增视频帧截图功能
-
-## [1.2.0] - 2026-06-29
-### Fixed
-- 修复字幕同步问题
-- 修复截图保存失败的问题
-
-## [1.1.0] - 2026-06-28
-### Added
-- 新增字幕高亮同步
-- 新增点击字幕跳转功能
-
-## [1.0.0] - 2026-06-27
-### Added
-- 初始版本发布
-- B站视频字幕抓取
-- 基础截图功能
+- 修复 API 通道"停止"按钮无效（真实 abort 底层 fetch）
+- 修复 DEEPSEEK_CHUNK 消息重复处理导致的双倍输出
+- 修复 dsSenderTabId 并发竞态（改为 Map 结构）
+- 修复 PoW 标签页每次总结时重复创建的问题
+- 修复登录检测不准确（cookie 存在时创建专用标签页重试 token 提取）
+- 修复登录按钮无法打开登录页（忽略流式状态，始终前台打开）
+- 修复连接检测轮询永不停止（改用固定 30s 超时）
+- 修复 DeepSeek 登出后仍显示已登录（开始总结前重新检测）
+- 修复 deepseek-api.js sendDeepSeekMessage 缩进混乱
+- 修复 panel 创建时 Footer 按钮初始出现在错误标签页

@@ -89,9 +89,11 @@
     }
   }
 
-  // 终止接口：API 通道本身就是一次性 fetch，无法采用 stop_stream；仅重置状态
+  // 终止接口：发送 api-abort 消息终止 background fetch
   function abort() {
-    chrome.runtime.sendMessage({ type: 'api-abort', requestId: activeRequestId });
+    if (activeRequestId) {
+      chrome.runtime.sendMessage({ type: 'api-abort', requestId: activeRequestId });
+    }
     activeRequestId = null;
     setState('idle');
   }

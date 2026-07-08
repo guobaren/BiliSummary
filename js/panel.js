@@ -109,7 +109,7 @@
 
     // Footer
     footerEl = document.createElement('div');
-    footerEl.className = 'bn-footer bn-show';
+    footerEl.className = 'bn-footer';
     footerEl.innerHTML = `
       <button data-action="refresh">刷新</button>
       <button data-action="copy">复制</button>
@@ -147,6 +147,10 @@
     footerEl.addEventListener('click', onFooterClick);
     bindSettingEvents();
     bindAiEvents();
+
+    // 同步 footer 状态到当前标签页（默认 'ai'，footer 不显示）
+    const initialTab = window.BiViNote.state.activeTab || 'ai';
+    switchTab(initialTab);
 
     // 应用字体、行高
     applyDisplaySettings();
@@ -234,14 +238,14 @@
     }
   }
 
+  let aiLoginPollStartTime = 0;
   function startAiLoginPoll() {
     stopAiLoginPoll();
-    let attempts = 0;
+    aiLoginPollStartTime = Date.now();
     aiLoginPollTimer = setInterval(async () => {
-      attempts++;
       if (!window.BiViNote.deepseek) return;
       await window.BiViNote.deepseek.checkLogin();
-      if (window.BiViNote.deepseek.getState() === 'ready' || attempts >= 15) {
+      if (window.BiViNote.deepseek.getState() === 'ready' || Date.now() - aiLoginPollStartTime > 30000) {
         stopAiLoginPoll();
         refreshAiStatusUI();
       }
@@ -429,11 +433,13 @@
   async function onAiActionClick() {
     if (getActiveChannel() === 'browser') {
       const ds = window.BiViNote.deepseek;
-      const st = ds.getState();
-      if (st === 'not_logged_in') {
+      // 每次点击前重新检测登录，捕获外部登出
+      const loginResult = await ds.checkLogin().catch(() => ({ loggedIn: false }));
+      if (!loginResult?.loggedIn) {
         refreshAiStatusUI('not_logged_in');
         return;
       }
+      const st = ds.getState();
       if (st === 'reading' || st === 'responding') {
         ds.abort();
         return;
@@ -765,7 +771,7 @@
         <div class="bn-about">
           <div class="bn-about-divider"></div>
           <div class="bn-about-version">BiliSumi <span id="bn-version"></span></div>
-          <a class="bn-about-link" href="https://github.com/hyglgithub/BiViNote/releases" target="_blank">GitHub Releases ↗</a>
+          <a class="bn-about-link" href="https://github.com/guobaren/BiliSummary/releases" target="_blank">GitHub Releases ↗</a>
         </div>
       </div>
       <div id="bn-settings-editor" style="display:none">

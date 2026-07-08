@@ -13,8 +13,7 @@
     "https://api.anthropic.com/*",
     "https://generativelanguage.googleapis.com/*",
     "https://open.bigmodel.cn/*",
-    "https://dashscope.aliyuncs.com/*",
-    "https://*/*"
+    "https://dashscope.aliyuncs.com/*"
   ],
   "background": {
     "service_worker": "background.js"
