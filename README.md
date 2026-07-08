@@ -113,6 +113,10 @@ BiliSummary/
 
 [MIT](LICENSE)
 
+## 致谢
+
+本工具基于 [hyglgithub/BiViNote](https://github.com/hyglgithub/BiViNote) 项目库开发，在原作基础上进行了功能重构和扩展。
+
 ## 免责声明
 
 本工具仅在用户已登录 B 站、且有访问权限的前提下获取字幕数据。所有数据通过用户自己的浏览器获取，不经过任何第三方服务器。本工具不存储、不分发任何 B 站内容。使用本工具产生的所有后果由用户自行承担。
