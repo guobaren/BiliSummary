@@ -172,6 +172,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     dsSseProcessors = {};
     dsSenderTabs = {};
+    // 清除会话 ID，让下次总结创建新会话
+    dsChatId = null;
     return false;
   }
 
