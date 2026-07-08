@@ -1,13 +1,20 @@
 {
   "manifest_version": 3,
-  "name": "BiViNote",
-  "version": "2.2.0",
-  "description": "B站视频字幕笔记工具 - 截图+字幕+Markdown",
-  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "name": "BiliSumi",
+  "version": "1.0.0",
+  "description": "B站视频字幕抓取 + AI 总结（支持 DeepSeek 浏览器 SDK 与通用 AI API 双通道）",
+  "permissions": ["storage", "activeTab", "scripting", "tabs", "cookies", "contextMenus"],
   "host_permissions": [
     "https://api.bilibili.com/*",
     "https://*.bilibili.com/*",
-    "*://chat.deepseek.com/*"
+    "*://chat.deepseek.com/*",
+    "https://api.deepseek.com/*",
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://open.bigmodel.cn/*",
+    "https://dashscope.aliyuncs.com/*",
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -18,8 +25,8 @@
         "*://*.bilibili.com/video/*",
         "*://*.bilibili.com/list/*"
       ],
-      "js": ["libs/jszip.min.js", "libs/cropper.min.js", "libs/wasm-solver.js", "js/state.js", "js/panel.js", "js/subtitle.js", "js/chapter.js", "js/video-info.js", "js/capture.js", "js/export.js", "js/settings.js", "js/crop-viewer.js", "js/deepseek.js", "content.js"],
-      "css": ["libs/cropper.min.css", "css/panel.css"],
+      "js": ["libs/wasm-solver.js", "js/state.js", "js/settings.js", "js/subtitle.js", "js/chapter.js", "js/deepseek.js", "js/api-ai.js", "js/panel.js", "js/export.js", "content.js"],
+      "css": ["css/panel.css"],
       "run_at": "document_idle"
     }
   ],

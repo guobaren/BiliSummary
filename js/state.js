@@ -26,34 +26,28 @@ window.BiViNote.state = {
   // 章节
   chapters: [],
 
-  // 截图 Map<subtitleIndex, {blob, url}>
-  screenshots: new Map(),
-
   // UI 状态
   panelVisible: false,
-  activeTab: 'subtitle',
-  collapsed: false,
+  activeTab: 'ai',
   fetchRunId: 0,
 
   // 设置
   settings: {
     fontSize: 'default',
     lineHeight: 'standard',
-    frameStep: 0.2,
     autoScroll: true,
     darkMode: false,
-    subtitleLang: ''
+    subtitleLang: '',
+    deepseekPrompt: '',
+    aiChannel: 'browser',   // 'browser' | 'api'
+    floatIconEnabled: true, // 浮动图标常驻
+    apiCfg: {
+      endpoint: 'https://api.deepseek.com/v1/chat/completions',
+      apiKey: '',
+      model: 'deepseek-v4-flash',
+      stream: true,
+    },
   },
-
-  // 视频信息页勾选状态
-  videoInfoChecked: {
-    title: true,
-    author: true,
-    date: false,
-    duration: false,
-    url: false,
-    description: false
-  }
 };
 
 /**
@@ -78,9 +72,4 @@ window.BiViNote.state.reset = function () {
   s.chapters = [];
   // 递增 runId，取消所有进行中的请求
   s.fetchRunId++;
-  // 释放截图 Blob URL
-  for (const [, val] of s.screenshots) {
-    if (val.url) URL.revokeObjectURL(val.url);
-  }
-  s.screenshots.clear();
 };

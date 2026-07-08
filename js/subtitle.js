@@ -1,6 +1,6 @@
 /**
  * BiViNote Subtitle Module
- * 字幕获取、解析、渲染、高亮同步
+ * 字幕获取、解析、渲染、高亮同步（精简版：移除截图相关）
  */
 (function () {
   'use strict';
@@ -82,10 +82,8 @@
 
   function pickPageFromPages(pages, pageIndex) {
     const safePages = Array.isArray(pages) ? pages : [];
-    // 按数组下标
     const byIndex = safePages[pageIndex - 1];
     if (byIndex?.cid) return byIndex;
-    // 按 page 字段
     const byNo = safePages.find(item => Number(item.page) === pageIndex);
     if (byNo?.cid) return byNo;
     return null;
@@ -103,21 +101,18 @@
       return;
     }
 
-    // BVID 变化时重置旧状态，防止残留数据
     if (newBvid !== s.bvid) {
       s.reset();
     }
     s.bvid = newBvid;
 
-    // 每次刷新递增 runId，取消过期请求
     const runId = ++s.fetchRunId;
 
     panel.showToast('正在获取字幕...');
 
     try {
-      // 获取视频元信息
       const meta = await fetchVideoMeta(s.bvid);
-      if (runId !== s.fetchRunId) return; // 请求已过期
+      if (runId !== s.fetchRunId) return;
 
       s.aid = meta.aid || '';
       s.title = meta.title || '';
@@ -126,10 +121,6 @@
       s.description = meta.description || '';
       s.videoDuration = meta.defaultDuration || 0;
 
-      // 标题获取后立即更新提示词
-      panel.renderDoc();
-
-      // 用 URL 中的 ?p= 参数选择正确的分P，获取对应 CID
       const pageIndex = extractPageIndex(location.href);
       s.pageIndex = pageIndex;
       const currentPage = pickPageFromPages(meta.pages, pageIndex);
@@ -140,24 +131,12 @@
         return;
       }
 
-      // 获取字幕列表和章节
       const bundle = await fetchSubtitleList(s.bvid, s.cid, s.aid);
-      if (runId !== s.fetchRunId) return; // 请求已过期
+      if (runId !== s.fetchRunId) return;
 
       s.subtitles = bundle.subtitles || [];
       s.chapters = bundle.chapters || [];
 
-      // 渲染视频信息
-      if (window.BiViNote.videoInfo) {
-        window.BiViNote.videoInfo.render();
-      }
-
-      // 渲染章节
-      if (window.BiViNote.chapter) {
-        window.BiViNote.chapter.render();
-      }
-
-      // 更新字幕语言下拉
       panel.updateSubtitleSelect(s.subtitles, s.selectedSubtitleUrl);
 
       if (s.subtitles.length === 0) {
@@ -167,7 +146,6 @@
         return;
       }
 
-      // 优先选择上次使用的字幕语言，否则选第一个
       let preferred = s.subtitles[0];
       if (s.selectedSubtitleLang) {
         const found = s.subtitles.find(t => t.lan === s.selectedSubtitleLang);
@@ -175,10 +153,10 @@
       }
       await loadSubtitle(preferred.subtitleUrl, preferred.lan);
 
-      if (runId !== s.fetchRunId) return; // 请求已过期
+      if (runId !== s.fetchRunId) return;
       panel.showToast('字幕获取成功');
     } catch (err) {
-      if (runId !== s.fetchRunId) return; // 请求已过期
+      if (runId !== s.fetchRunId) return;
       console.error('[BiViNote] refresh error:', err);
       panel.showToast('获取失败：' + err.message);
     }
@@ -193,7 +171,7 @@
 
     try {
       const body = await fetchSubtitleBody(url);
-      if (runId !== s.fetchRunId) return; // 请求已过期
+      if (runId !== s.fetchRunId) return;
       s.subtitleBody = body;
       s.selectedSubtitleUrl = url;
       s.selectedSubtitleLang = lang || '';
@@ -224,7 +202,6 @@
 
     container.innerHTML = '';
 
-    // 只绑定一次事件委托
     if (!subtitleListenerAttached) {
       container.addEventListener('click', onSubtitleClick);
       subtitleListenerAttached = true;
@@ -239,46 +216,25 @@
       const text = String(item.content || '').trim();
       if (!text) return;
 
-      const screenshot = s.screenshots.get(index);
       const el = document.createElement('div');
+      el.className = 'bn-row';
+      el.dataset.index = index;
+      el.innerHTML = `
+        <span class="bn-row-time">${formatTime(item.from)}</span>
+        <span class="bn-row-text">${escapeHtml(text)}</span>
+        <div class="bn-btns">
+          <button data-action="copy">复制</button>
+        </div>
+      `;
 
-      if (screenshot) {
-        el.className = 'bn-row-img';
-        el.dataset.index = index;
-        el.innerHTML = `
-          <img class="bn-snap-thumb" src="${screenshot.url}" alt="截图" data-index="${index}">
-          <div class="bn-text-wrap">
-            <div class="bn-time-text">${formatTime(item.from)}</div>
-            <div class="bn-sub-text">${escapeHtml(text)}</div>
-          </div>
-          <div class="bn-btns">
-            <button data-action="copy">复制</button>
-            <button data-action="cancel-snap">取消截图</button>
-          </div>
-        `;
-      } else {
-        el.className = 'bn-row';
-        el.dataset.index = index;
-        el.innerHTML = `
-          <span class="bn-row-time">${formatTime(item.from)}</span>
-          <span class="bn-row-text">${escapeHtml(text)}</span>
-          <div class="bn-btns">
-            <button data-action="copy">复制</button>
-            <button data-action="add-snap">截图</button>
-          </div>
-        `;
-      }
-
-      // 点击行跳转
       el.addEventListener('click', (e) => {
-        if (e.target.closest('.bn-btns') || e.target.closest('.bn-snap-thumb')) return;
+        if (e.target.closest('.bn-btns')) return;
         jumpToTime(item.from);
       });
 
       container.appendChild(el);
     });
 
-    // 重新渲染后恢复高亮状态
     if (lastActiveIndex >= 0) {
       updateHighlight(lastActiveIndex);
     }
@@ -288,32 +244,14 @@
 
   function onSubtitleClick(e) {
     const btn = e.target.closest('button');
-    const thumb = e.target.closest('.bn-snap-thumb');
-    const s = window.BiViNote.state;
-
-    if (thumb) {
-      const index = parseInt(thumb.dataset.index);
-      window.BiViNote.cropViewer.open(index);
-      return;
-    }
-
     if (!btn) return;
-
-    const row = btn.closest('.bn-row') || btn.closest('.bn-row-img');
+    const row = btn.closest('.bn-row');
     if (!row) return;
     const index = parseInt(row.dataset.index);
     const action = btn.dataset.action;
 
     if (action === 'copy') {
       copySingleText(index);
-    } else if (action === 'add-snap') {
-      if (window.BiViNote.capture) {
-        window.BiViNote.capture.addScreenshot(index);
-      }
-    } else if (action === 'cancel-snap') {
-      if (window.BiViNote.capture) {
-        window.BiViNote.capture.removeScreenshot(index);
-      }
     }
   }
 
@@ -340,123 +278,70 @@
     const video = getVideoElement();
     if (!video) return;
 
-    const onTimeUpdate = () => {
-      const s = window.BiViNote.state;
-      if (s.activeTab !== 'subtitle') return;
+    const s = window.BiViNote.state;
+    const container = document.getElementById('bn-subtitle-list');
+    if (!container) return;
 
-      const currentTime = video.currentTime;
-      const activeIndex = findActiveIndex(currentTime);
+    // 滚动控制：用户上滑暂停自动滚动，回到底部恢复
+    if (!scrollHandlers) {
+      scrollHandlers = {
+        onScroll: () => {
+          const now = Date.now();
+          if (manualScrollPauseUntil > 0 && now > manualScrollPauseUntil) {
+            manualScrollPauseUntil = 0;
+          }
+          if (manualScrollPauseUntil === 0) {
+            const isAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 5;
+            if (!isAtBottom) {
+              manualScrollPauseUntil = now + 3000;
+            }
+          }
+        }
+      };
+      container.addEventListener('scroll', scrollHandlers.onScroll, { passive: true });
+    }
 
-      // 高亮始终生效（不受 autoScroll 影响）
-      if (activeIndex !== lastActiveIndex) {
-        updateHighlight(activeIndex);
-        lastActiveIndex = activeIndex;
-      }
-
-      // 自动滚动：仅在开启且用户未手动滚动时生效
-      if (s.settings.autoScroll && activeIndex >= 0) {
-        if (Date.now() > manualScrollPauseUntil) {
-          scrollToItem(activeIndex);
+    syncTimer = setInterval(() => {
+      if (video.paused) return;
+      const idx = findActiveIndex(video.currentTime);
+      if (idx >= 0 && idx !== lastActiveIndex) {
+        updateHighlight(idx);
+        // 自动滚动
+        if (manualScrollPauseUntil === 0) {
+          const activeEl = container.querySelector(`[data-index="${idx}"]`);
+          if (activeEl) {
+            const top = activeEl.offsetTop - container.clientHeight / 2;
+            container.scrollTo({ top: top, behavior: 'smooth' });
+          }
         }
       }
-    };
-
-    // seek 完成后立即更新高亮（解决暂停状态跳转后高亮不更新的问题）
-    const onSeeked = () => {
-      const s = window.BiViNote.state;
-      if (s.activeTab !== 'subtitle') return;
-
-      const currentTime = video.currentTime;
-      const activeIndex = findActiveIndex(currentTime);
-
-      if (activeIndex !== lastActiveIndex) {
-        updateHighlight(activeIndex);
-        lastActiveIndex = activeIndex;
-      }
-
-      // seek 后也触发自动滚动
-      if (s.settings.autoScroll && activeIndex >= 0) {
-        scrollToItem(activeIndex);
-      }
-    };
-
-    video.addEventListener('timeupdate', onTimeUpdate);
-    video.addEventListener('seeked', onSeeked);
-    syncTimer = { video, handler: onTimeUpdate, seekedHandler: onSeeked };
-
-    // 监听用户手动滚动，暂停自动滚动
-    setupManualScrollDetection();
+    }, 300);
   }
 
   function stopSync() {
     if (syncTimer) {
-      syncTimer.video.removeEventListener('timeupdate', syncTimer.handler);
-      if (syncTimer.seekedHandler) {
-        syncTimer.video.removeEventListener('seeked', syncTimer.seekedHandler);
-      }
+      clearInterval(syncTimer);
       syncTimer = null;
     }
-    // 清理滚动监听
-    if (scrollHandlers) {
-      scrollHandlers.el.removeEventListener('wheel', scrollHandlers.wheel);
-      scrollHandlers.el.removeEventListener('touchmove', scrollHandlers.touch);
-      scrollHandlers = null;
-    }
-    lastActiveIndex = -1;
-  }
-
-  function setupManualScrollDetection() {
-    const scrollWrap = window.BiViNote.panel.getScrollWrap();
-    if (!scrollWrap) return;
-
-    const handler = () => {
-      if (Date.now() > manualScrollPauseUntil) {
-        manualScrollPauseUntil = Date.now() + 3000;
-      }
-    };
-    scrollWrap.addEventListener('wheel', handler, { passive: true });
-    scrollWrap.addEventListener('touchmove', handler, { passive: true });
-    scrollHandlers = { el: scrollWrap, wheel: handler, touch: handler };
   }
 
   function findActiveIndex(currentTime) {
-    const body = window.BiViNote.state.subtitleBody;
-    for (let i = 0; i < body.length; i++) {
-      const item = body[i];
-      const to = item.to || item.from + 2;
-      if (currentTime >= item.from && currentTime < to) {
-        return i;
-      }
+    const s = window.BiViNote.state;
+    if (!s.subtitleBody || s.subtitleBody.length === 0) return -1;
+    for (let i = s.subtitleBody.length - 1; i >= 0; i--) {
+      if (currentTime >= s.subtitleBody[i].from) return i;
     }
-    return -1;
+    return 0;
   }
 
   function updateHighlight(activeIndex) {
     const container = document.getElementById('bn-subtitle-list');
     if (!container) return;
-    const rows = container.querySelectorAll('.bn-row, .bn-row-img');
-    rows.forEach((row, i) => {
-      row.classList.toggle('bn-active', i === activeIndex);
+    const rows = container.querySelectorAll('.bn-row');
+    rows.forEach(row => {
+      row.classList.toggle('bn-active', parseInt(row.dataset.index) === activeIndex);
     });
-  }
-
-  function scrollToItem(index) {
-    const container = document.getElementById('bn-subtitle-list');
-    const scrollWrap = window.BiViNote.panel.getScrollWrap();
-    if (!container || !scrollWrap) return;
-    const rows = container.querySelectorAll('.bn-row, .bn-row-img');
-    const target = rows[index];
-    if (!target) return;
-
-    // 目标位置：距滚动容器顶部约 3 行高度
-    const rowHeight = target.offsetHeight || 40;
-    const offset = rowHeight * 5.0
-    const targetTop = target.offsetTop - offset;
-
-    scrollWrap.scrollTo({
-      top: Math.max(0, targetTop),
-      behavior: 'smooth'
-    });
+    lastActiveIndex = activeIndex;
   }
 
   // ── 复制单条字幕 ──
@@ -484,82 +369,6 @@
     navigator.clipboard.writeText(text).then(() => {
       window.BiViNote.panel.showToast('已复制全部字幕');
     });
-  }
-
-  // ── 预览弹窗 ──
-
-  function showPreview(index) {
-    const s = window.BiViNote.state;
-    const screenshot = s.screenshots.get(index);
-    if (!screenshot) return;
-
-    const video = getVideoElement();
-
-    const overlay = document.createElement('div');
-    overlay.className = 'bn-preview-overlay';
-    overlay.setAttribute('data-bn-theme', window.BiViNote.state.settings.darkMode ? 'dark' : '');
-
-    let currentUrl = screenshot.url;
-    let currentBlob = screenshot.blob;
-
-    overlay.innerHTML = `
-      <div class="bn-preview-box">
-        <img class="bn-preview-img" src="${currentUrl}" alt="预览">
-        <div class="bn-preview-btns">
-          <button data-act="prev">上一帧</button>
-          <button data-act="next">下一帧</button>
-          <button data-act="download">下载截图</button>
-          <button data-act="clipboard">复制到剪贴板</button>
-          <button data-act="close">关闭</button>
-        </div>
-      </div>
-    `;
-
-    const imgEl = overlay.querySelector('.bn-preview-img');
-    let frameActionBusy = false;
-
-    async function doFrameAction(act) {
-      if (!video || frameActionBusy) return;
-      frameActionBusy = true;
-      try {
-        const step = s.settings.frameStep || 0.2;
-        if (act === 'prev') {
-          video.currentTime = Math.max(0, video.currentTime - step);
-        } else {
-          video.currentTime = Math.min(video.duration, video.currentTime + step);
-        }
-        await new Promise(r => video.addEventListener('seeked', r, { once: true }));
-        const newBlob = await window.BiViNote.capture.captureFrame(video);
-        if (currentUrl) URL.revokeObjectURL(currentUrl);
-        currentUrl = URL.createObjectURL(newBlob);
-        currentBlob = newBlob;
-        imgEl.src = currentUrl;
-        s.screenshots.set(index, { blob: currentBlob, url: currentUrl });
-      } finally {
-        frameActionBusy = false;
-      }
-    }
-
-    overlay.addEventListener('click', async (e) => {
-      const act = e.target.dataset?.act;
-      if (act === 'close' || e.target === overlay) {
-        overlay.remove();
-        return;
-      }
-      if (act === 'prev' || act === 'next') {
-        await doFrameAction(act);
-      } else if (act === 'download') {
-        const video = getVideoElement();
-        const ts = video ? video.currentTime : 0;
-        window.BiViNote.capture.saveToFile(currentBlob, window.BiViNote.capture.generateDownloadFilename(ts));
-        window.BiViNote.panel.showToast('截图已保存');
-      } else if (act === 'clipboard') {
-        const ok = await window.BiViNote.capture.copyToClipboard(currentBlob);
-        window.BiViNote.panel.showToast(ok ? '已复制到剪贴板' : '复制失败');
-      }
-    });
-
-    document.body.appendChild(overlay);
   }
 
   // ── 工具函数 ──

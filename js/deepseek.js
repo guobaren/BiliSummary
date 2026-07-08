@@ -50,9 +50,13 @@
     });
   }
 
+  // 对话历史（保留多轮）
+  let history = [];
+
   function sendMarkdown(markdown, prompt) {
     if (state === 'reading' || state === 'responding') return;
 
+    // 不清空历史，仅保存本轮思考/回复占位
     thinkText = '';
     responseText = '';
     inThink = false;
@@ -84,6 +88,12 @@
     } else if (msg.type === 'ds-done') {
       if (msg.requestId && msg.requestId !== activeRequestId) return;
       flush();
+      // 把本轮保存进历史，供下次追问时携带上下文
+      history.push({ think: thinkText.trim(), response: responseText.trim() });
+      // 重置本轮累加器，保留 history 到下一轮开始前
+      thinkText = '';
+      responseText = '';
+      inThink = false;
       setState('done');
       emit('done', getResult());
     } else if (msg.type === 'ds-error') {
@@ -149,6 +159,7 @@
     thinkText = '';
     responseText = '';
     inThink = false;
+    history = [];
     setState('ready');
   }
 
@@ -159,6 +170,9 @@
   }
 
   function openLogin() {
+    if (state === 'reading' || state === 'responding') {
+      try { window.BiViNote.panel.showToast('总结中，已在新标签页后台打开'); } catch {}
+    }
     chrome.runtime.sendMessage({ type: 'ds-open-login' });
   }
 

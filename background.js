@@ -57,8 +57,50 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   } catch {}
 });
 
+// ── 右键菜单 ──
+
+// 创建/更新右键菜单项
+function updateContextMenu() {
+  chrome.storage.local.get(["bivinote_settings"], (result) => {
+    const settings = result.bivinote_settings || {};
+    const enabled = settings.floatIconEnabled !== false; // default true
+    chrome.contextMenus.removeAll(() => {
+      chrome.contextMenus.create({
+        id: "toggle-float-icon",
+        title: "浮动图标常驻",
+        type: "checkbox",
+        checked: enabled,
+        contexts: ["action"],
+      });
+    });
+  });
+}
+
+// 处理右键菜单点击
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "toggle-float-icon") {
+    const enabled = info.checked;
+    // 保存到 storage
+    chrome.storage.local.get(["bivinote_settings"], (result) => {
+      const settings = result.bivinote_settings || {};
+      settings.floatIconEnabled = enabled;
+      chrome.storage.local.set({ bivinote_settings: settings }, () => {
+        // 通知所有 B站标签页更新
+        chrome.tabs.query({ url: "*://*.bilibili.com/*" }, (tabs) => {
+          tabs.forEach(t => {
+            chrome.tabs.sendMessage(t.id, { type: "float-icon-toggle", enabled }).catch(() => {});
+          });
+        });
+      });
+    });
+  }
+});
+
+// 消息：同步右键菜单状态
+
 // 扩展安装/更新时，刷新所有标签页图标
 chrome.runtime.onInstalled.addListener(async () => {
+  updateContextMenu();
   try {
     const tabs = await chrome.tabs.query({});
     for (const tab of tabs) {
@@ -72,6 +114,11 @@ chrome.runtime.onInstalled.addListener(async () => {
 // ── 消息监听 ──
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'sync-float-icon-menu') {
+    chrome.contextMenus.update('toggle-float-icon', { checked: message.enabled });
+    sendResponse({ ok: true });
+    return true;
+  }
   if (message.type === 'fetch-video-meta') {
     fetchVideoMeta(message.bvid)
       .then(data => sendResponse({ ok: true, data }))
@@ -101,18 +148,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.type === 'ds-abort') {
-    // 获取当前请求的 chatId 和 messageId，发送 stop_stream 到 DeepSeek 标签页
+    // 直连通道：中断 fetch
+    if (dsAbortController) {
+      dsAbortController.abort();
+      dsAbortController = null;
+    }
+    // 标签页通道：发送 stop_stream 到 DeepSeek 标签页
     const processorIds = Object.keys(dsSseProcessors);
     if (processorIds.length > 0) {
       const processor = dsSseProcessors[processorIds[0]];
       const chatId = processor.getChatId();
-      const messageId = processor.getMessageId();
+      const msgId = processor.getMessageId();
+      if (msgId) dsUpdateLastMessageId(msgId);
       chrome.tabs.query({ url: '*://chat.deepseek.com/*' }, (tabs) => {
         if (tabs[0]?.id) {
           chrome.tabs.sendMessage(tabs[0].id, {
             type: 'ds-abort-stop',
             chatId,
-            messageId,
+            messageId: msgId,
           }).catch(() => {});
         }
       });
@@ -123,14 +176,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ds-send') {
     const requestId = message.requestId || crypto.randomUUID();
-    dsHandleSend(message.markdown, message.prompt, requestId);
+    dsHandleSend(message.markdown, message.prompt, requestId, message.chatId);
     sendResponse({ ok: true, requestId });
     return true;
   }
 
   if (message.type === 'ds-open-login') {
+    const isStreaming = Object.keys(dsSseProcessors).length > 0;
     chrome.tabs.query({ url: '*://chat.deepseek.com/*' }, (tabs) => {
-      if (tabs.length > 0) {
+      if (isStreaming) {
+        // 流式处理中：不激活已有标签页，新建后台标签页避免中断 SSE 连接
+        chrome.tabs.create({ url: 'https://chat.deepseek.com', active: false }).catch(() => {});
+      } else if (tabs.length > 0) {
         chrome.tabs.update(tabs[0].id, { active: true });
       } else {
         chrome.tabs.create({ url: 'https://chat.deepseek.com' });
@@ -143,8 +200,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const url = message.url || 'https://chat.deepseek.com';
     const isStreaming = Object.keys(dsSseProcessors).length > 0;
     chrome.tabs.query({ url: '*://chat.deepseek.com/*' }, (tabs) => {
-      if (isStreaming || tabs.length === 0) {
-        // 流式处理中或无标签页：新建标签页，避免中断正在运行的脚本
+      if (isStreaming) {
+        // 流式处理中：新建后台标签页，避免中断 SSE 连接
+        chrome.tabs.create({ url, active: false }).catch(() => {});
+      } else if (tabs.length === 0) {
         chrome.tabs.create({ url });
       } else {
         // 空闲：复用已有标签页
@@ -154,12 +213,64 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  // DeepSeek bridge → bilibili tab 转发
+  // ── DeepSeek bridge → bilibili tab 转发
   if (message.type === 'DEEPSEEK_CHUNK') {
     const rid = message.requestId;
     if (!dsSseProcessors[rid]) dsSseProcessors[rid] = dsCreateSSEProcessor();
     const processor = dsSseProcessors[rid];
     const text = processor.processChunk(message.chunk);
+    const chatId = processor.getChatId();
+    const msgId = processor.getMessageId();
+    if (msgId) dsUpdateLastMessageId(msgId);
+    if (chatId) dsUpdateChatId(chatId);
+    dsSendToBilibiliTab({ type: 'ds-chunk', text, requestId: rid, chatId });
+    return false;
+  }
+
+  // ── 通用 AI API 通道 ──
+  if (message.type === 'api-send') {
+    (async () => {
+      const cfg = {
+        endpoint: (message.endpoint || '').trim() || (await apiGetConfig()).endpoint,
+        apiKey: (message.apiKey || '').trim() || (await apiGetConfig()).apiKey,
+        model: (message.model || '').trim() || (await apiGetConfig()).model,
+        stream: message.stream !== false,
+      };
+      apiStreamCompletion(message.messages, cfg, message.requestId);
+    })();
+    sendResponse({ ok: true, requestId: message.requestId });
+    return true;
+  }
+
+  if (message.type === 'api-abort') {
+    // API 通道是一次性 fetch，无法中断；仅作占位
+    return false;
+  }
+
+  if (message.type === 'api-fetch-models') {
+    (async () => {
+      const cfg = {
+        endpoint: (message.endpoint || '').trim() || (await apiGetConfig()).endpoint,
+        apiKey: (message.apiKey || '').trim() || (await apiGetConfig()).apiKey,
+      };
+      try {
+        const models = await apiFetchModels(cfg);
+        sendResponse({ ok: true, models });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  // ── DeepSeek bridge → bilibili tab 转发
+  if (message.type === 'DEEPSEEK_CHUNK') {
+    const rid = message.requestId;
+    if (!dsSseProcessors[rid]) dsSseProcessors[rid] = dsCreateSSEProcessor();
+    const processor = dsSseProcessors[rid];
+    const text = processor.processChunk(message.chunk);
+    const msgId = processor.getMessageId();
+    if (msgId) dsUpdateLastMessageId(msgId);
     dsSendToBilibiliTab({ type: 'ds-chunk', text, requestId: rid, chatId: processor.getChatId() });
     return false;
   }
@@ -167,7 +278,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'DEEPSEEK_DONE') {
     const rid = message.requestId;
     if (dsSseProcessors[rid]) {
-      const tail = dsSseProcessors[rid].flush();
+      const processor = dsSseProcessors[rid];
+      const tail = processor.flush();
+      const msgId = processor.getMessageId();
+      if (msgId) dsUpdateLastMessageId(msgId);
       if (tail) dsSendToBilibiliTab({ type: 'ds-chunk', text: tail, requestId: rid });
       delete dsSseProcessors[rid];
     }
@@ -428,45 +542,245 @@ function formatDate(timestamp) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-// ── DeepSeek 文档整理 ──
+// ════════════════════════════════════════════════════════════════
+// 通道 A：通用 AI API（OpenAI 兼容协议）
+// ════════════════════════════════════════════════════════════════
+// 走 background fetch 绕过 content_scripts 的 CORS 限制。
+// 兼容 OpenAI 风格：POST {messages[], model, stream?} -> SSE 或一次性 JSON
+
+function apiGetConfig() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get('bivinote_api_cfg', (stored) => {
+      const cfg = stored.bivinote_api_cfg || {};
+      resolve({
+        endpoint: (cfg.endpoint || 'https://api.deepseek.com/v1/chat/completions').trim(),
+        apiKey: cfg.apiKey || '',
+        model: cfg.model || 'deepseek-chat',
+        stream: cfg.stream !== false,     // 默认开启流式
+      });
+    });
+  });
+}
+
+async function apiStreamCompletion(messages, cfg, requestId) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${cfg.apiKey}`,
+  };
+  const payload = {
+    model: cfg.model,
+    messages,
+    stream: cfg.stream,
+  };
+
+  // 仅响应发起方的标签页
+  const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const senderTabId = activeTabs[0]?.id;
+
+  const forward = (msg) => {
+    if (!senderTabId) return;
+    chrome.tabs.sendMessage(senderTabId, { ...msg, requestId }).catch(() => {});
+  };
+
+  try {
+    const res = await fetch(cfg.endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      forward({ type: 'api-error', error: `HTTP ${res.status} ${text.slice(0, 300)}` });
+      return;
+    }
+
+    if (cfg.stream && res.headers.get('content-type')?.includes('text/event-stream')) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        while (true) {
+          const idx = buffer.indexOf('\n\n');
+          if (idx === -1) break;
+          const eventStr = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 2);
+          for (const line of eventStr.split('\n')) {
+            if (!line.startsWith('data:')) continue;
+            const jsonStr = line.slice(5).trim();
+            if (!jsonStr || jsonStr === '[DONE]') continue;
+            let parsed;
+            try { parsed = JSON.parse(jsonStr); } catch { continue; }
+            // 标准 OpenAI 风格
+            const choice = parsed.choices?.[0];
+            if (!choice) {
+              // DeepSeek 自定义 chunk：content / reasoning 等字段
+              if (parsed.content || parsed.reasoning) {
+                if (parsed.reasoning) forward({ type: 'api-chunk', role: 'think', text: parsed.reasoning });
+                if (parsed.content) forward({ type: 'api-chunk', role: 'response', text: parsed.content });
+              }
+              continue;
+            }
+            const delta = choice.delta || {};
+            if (delta.content) {
+              forward({ type: 'api-chunk', role: 'response', text: delta.content });
+            }
+            if (delta.reasoning_content) {
+              forward({ type: 'api-chunk', role: 'think', text: delta.reasoning_content });
+            }
+          }
+        }
+      }
+    } else {
+      // 非流式：一次性返回完整文本
+      let data;
+      try { data = await res.json(); } catch {
+        forward({ type: 'api-error', error: '解析响应 JSON 失败' });
+        return;
+      }
+      const content = data.choices?.[0]?.message?.content
+        || data.content
+        || data?.response
+        || '';
+      if (!content) {
+        forward({ type: 'api-error', error: `响应格式异常: ${JSON.stringify(data).slice(0, 200)}` });
+        return;
+      }
+      forward({ type: 'api-chunk', role: 'response', text: content });
+    }
+    forward({ type: 'api-done' });
+  } catch (err) {
+    forward({ type: 'api-error', error: `请求异常: ${String(err)}` });
+  }
+}
+
+// 获取厂商模型列表：GET {base}/models 或 {base}/v1/models
+async function apiFetchModels(cfg) {
+  let base = cfg.endpoint.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '');
+  const candidates = [
+    `${base}/models`,
+    `${base}/v1/models`,
+  ];
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${cfg.apiKey}` },
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : null);
+      if (!list) {
+        if (Array.isArray(data) && data.length && data[0]?.id) return data.map(it => ({ id: it.id, name: it.name || it.id }));
+        continue;
+      }
+      return list.map(it => ({ id: it.id, name: it.name || it.id }));
+    } catch (e) {
+      continue;
+    }
+  }
+  throw new Error('无法从该接口获取模型列表；请检查 endpoint / apiKey 是否正确');
+}
+
+// ════════════════════════════════════════════════════════════════
+// 通道 B：DeepSeek 浏览器端 SDK（chat.deepseek.com 注入脚本）
+// ════════════════════════════════════════════════════════════════
 
 const DS_URL = 'https://chat.deepseek.com';
 
-const DS_DEFAULT_PROMPT = `你是一个视频笔记整理助手，将视频导出的 Markdown 文档整理为简洁、高质量、适合长期保存的 Markdown 学习笔记。
+const DS_DEFAULT_PROMPT = `你是一个视频内容总结助手，根据用户提供的字幕文本生成结构化、易读的视频总结笔记。
 
-要求：
+输出格式要求：
 
-1. 删除口语化内容、重复内容、无意义过渡语句，例如：好的、然后、这里呢、兄弟、就是说等。
-2. 删除所有字幕时间戳，例如 \`00:12\`、\`05:30\`。
-3. 不要逐句输出字幕，将连续字幕整理为简洁、连贯、易阅读的知识内容。
-4. 字幕可能由 AI 识别生成，存在错别字、同音字、术语错误、英文大小写错误，请结合上下文修正，并统一技术术语写法。
-5. 若文档存在章节结构，严格按原始章节整理；若无章节，则按内容自然分段。
-6. 不要新增原文不存在的标题、章节或目录层级，不要改变原始内容顺序。
-7. 文档中形如 ![xxx](assets/数字.png) 的 Markdown 标记属于特殊文本块，() 内为相对资源路径且默认与前一句字幕内容关联；必须保留全部此类标记，禁止修改语法、alt 文本、路径或文件名，不得遗漏，可根据整理后的内容适当调整其在当前语义块中的位置。
-8. 保留所有技术名词、工具名、框架名、产品名，不要删除、替换或省略。
-9. 若存在 Frontmatter（文档开头 YAML），必须完整原样保留，禁止修改字段、字段值和字段顺序。
-10. 仅整理原文，禁止总结、解释、扩展原文不存在的信息或补充额外知识。
+视频总结标题：基于视频主题提炼一个精炼、有吸引力的标题。
 
-待整理文档：
+UP主信息：提取作者名称。
+
+核心观点概述：用1-2句话概括视频的核心主旨或UP主最想传达的观点。
+
+主要内容分点整理：按章节或主题分点整理。每个大点需有明确的小标题（如"1. 安装与登录"），小标题下使用简洁的要点或短句展开说明。保留所有技术名词、工具名、框架名、产品名。删除口语化内容、重复内容，修正错别字，合并连续字幕为连贯语句。
+
+额外约束：
+
+不要新增原文不存在的技术细节或扩展知识，仅整理原文信息。
+
+每个知识点下可包含子要点（使用短横线"-"或编号），但总层级不超过两级。
+
+待总结字幕：
 
 {markdown}
 
-直接输出整理后的 Markdown 文档，不要输出任何额外内容。`;
+直接输出整理后的内容，不要输出任何额外说明文字。`;
+
 let dsInjectedTabs = new Set();
 let dsChatId = null;
 let dsSseProcessors = {};
+let dsLastMessageId = null;
 let dsSenderTabId = null;
+let dsAbortController = null;
 
-chrome.storage.local.get('chatId', (stored) => {
+// 持久化 DeepSeek chatId
+function dsUpdateChatId(newChatId) {
+  if (!newChatId) return;
+  if (newChatId === dsChatId) return;
+  dsChatId = newChatId;
+  chrome.storage.local.set({ chatId: newChatId }).catch(() => {});
+}
+
+// 持久化 DeepSeek messageId（追问时作为 parentMessageId）
+function dsUpdateLastMessageId(msgId) {
+  if (!msgId) return;
+  if (msgId === dsLastMessageId) return;
+  dsLastMessageId = msgId;
+  chrome.storage.local.set({ dsLastMessageId: msgId }).catch(() => {});
+}
+
+// 加载持久化的会话状态
+let dsStorageLoaded = false;
+async function dsEnsureStorageLoaded() {
+  if (dsStorageLoaded) return;
+  try {
+    const stored = await chrome.storage.local.get(['chatId', 'dsLastMessageId']);
+    if (stored.chatId) dsChatId = stored.chatId;
+    if (stored.dsLastMessageId) dsLastMessageId = stored.dsLastMessageId;
+  } catch {}
+  dsStorageLoaded = true;
+}
+// 启动时异步加载
+chrome.storage.local.get(['chatId', 'dsLastMessageId'], (stored) => {
   if (stored.chatId) dsChatId = stored.chatId;
+  if (stored.dsLastMessageId) dsLastMessageId = stored.dsLastMessageId;
+  dsStorageLoaded = true;
 });
 
+let dsEnsureTabLock = null;
+
 async function dsEnsureTab() {
-  const tabs = await chrome.tabs.query({ url: '*://chat.deepseek.com/*' });
-  if (tabs.length > 0 && tabs[0].id) return tabs[0];
-  const tab = await chrome.tabs.create({ url: DS_URL, active: false });
-  await dsWaitTabComplete(tab.id, 20000);
-  return tab;
+  // 互斥锁：防止并发调用导致重复创建标签页
+  if (dsEnsureTabLock) return dsEnsureTabLock;
+
+  dsEnsureTabLock = (async () => {
+    // 优先使用已注入脚本的标签页
+    for (const tabId of dsInjectedTabs) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (tab?.url?.includes('chat.deepseek.com')) return tab;
+      } catch {}
+    }
+    const tabs = await chrome.tabs.query({ url: '*://chat.deepseek.com/*' });
+    if (tabs.length > 0 && tabs[0].id) return tabs[0];
+    const tab = await chrome.tabs.create({ url: DS_URL, active: false });
+    await dsWaitTabComplete(tab.id, 20000);
+    return tab;
+  })();
+
+  try {
+    return await dsEnsureTabLock;
+  } finally {
+    dsEnsureTabLock = null;
+  }
 }
 
 async function dsWaitTabComplete(tabId, timeout) {
@@ -494,60 +808,37 @@ async function dsInjectScripts(tabId) {
   dsInjectedTabs.add(tabId);
 }
 
-chrome.tabs.onRemoved.addListener((tabId) => { dsInjectedTabs.delete(tabId); });
+chrome.tabs.onRemoved.addListener((tabId) => {
+  dsInjectedTabs.delete(tabId);
+  // 流式处理中被关闭 → 通知前端
+  if (Object.keys(dsSseProcessors).length > 0) {
+    // 检查是否有关联的 processor 使用了这个标签页
+    dsSendToBilibiliTab({ type: 'ds-error', error: 'DeepSeek 标签页已关闭，输出中断。请点击「开始总结」重试。', requestId: Object.keys(dsSseProcessors)[0] });
+    dsSseProcessors = {};
+  }
+});
 
 async function dsCheckLogin() {
+  await dsEnsureStorageLoaded();
   try {
-    // 自动获取或创建 DeepSeek 标签页
-    const tab = await dsEnsureTab();
-    if (!tab?.id) return { loggedIn: false };
+    // 第 1 步：快速 cookie 检测（无需创建标签页）
+    let cookies;
+    try { cookies = await chrome.cookies.getAll({ domain: '.deepseek.com' }); } catch { cookies = []; }
+    const hasSessionCookie = cookies.some(c => ['ds_session_id', 'session_id', 'HWSID'].includes(c.name) && c.value);
 
-    // 主要方式：通过 localStorage token 验证
-    try {
-      const results = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        world: 'MAIN',
-        func: async () => {
-          function tryGetToken(raw) {
-            if (!raw || typeof raw !== 'string' || raw.length <= 10) return null;
-            try {
-              const parsed = JSON.parse(raw);
-              if (typeof parsed === 'string' && parsed.length > 10) return parsed;
-              if (typeof parsed === 'object' && parsed !== null) {
-                const t = parsed.token || parsed.value || parsed.access_token || parsed.jwt;
-                return (t && typeof t === 'string' && t.length > 10) ? t : null;
-              }
-            } catch { return raw; }
-            return null;
-          }
-          const keys = ['userToken', 'token', 'ds_token', 'auth_token', 'access_token', 'jwt'];
-          let token = null;
-          for (const key of keys) {
-            token = tryGetToken(localStorage.getItem(key));
-            if (token) break;
-          }
-          if (!token) return { loggedIn: false };
-          try {
-            const res = await fetch('https://chat.deepseek.com/api/v1/user/profile', {
-              method: 'GET',
-              headers: { 'Authorization': 'Bearer ' + token },
-              credentials: 'include',
-            });
-            return { loggedIn: res.ok };
-          } catch { return null; }
-        },
-      });
-      const r = results?.[0]?.result;
-      if (r && typeof r.loggedIn === 'boolean') return r;
-    } catch {}
+    if (!hasSessionCookie) {
+      dsAuthToken = null;
+      return { loggedIn: false };
+    }
 
-    // 降级：cookie 检测
-    const cookies = await chrome.cookies.getAll({ domain: '.deepseek.com' });
-    const cookieMap = Object.fromEntries(cookies.map(c => [c.name, c.value]));
-    const hasSession = ['ds_session_id', 'HWSID'].some(name => !!cookieMap[name]);
-    if (hasSession) return { loggedIn: true, key: 'cookie' };
+    // 第 2 步：有 cookie → 尝试提取 token（含重试）
+    const token = await dsEnsureToken();
+    if (token) {
+      return { loggedIn: true };
+    }
 
-    return { loggedIn: false };
+    // 第 3 步：token 提取失败 → 未登录（无 token 无法认证 API 请求）
+    return { loggedIn: false, reason: 'token_not_found' };
   } catch (e) {
     return { loggedIn: false, reason: String(e) };
   }
@@ -558,13 +849,56 @@ function dsSendToBilibiliTab(msg) {
   chrome.tabs.sendMessage(dsSenderTabId, msg).catch(() => {});
 }
 
-async function dsHandleSend(markdown, prompt, requestId) {
-  dsSseProcessors = {};
+async function dsHandleSend(markdown, prompt, requestId, senderChatId) {
+  await dsEnsureStorageLoaded();
   dsSenderTabId = null;
 
   const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
   if (activeTabs[0]?.id) dsSenderTabId = activeTabs[0].id;
 
+  // 如果 deepseek.js 传来了本地 chatId（可能与后台不同步），优先使用并持久化
+  if (senderChatId && senderChatId !== dsChatId) {
+    dsChatId = senderChatId;
+    chrome.storage.local.set({ chatId: dsChatId }).catch(() => {});
+  }
+
+  // 追问 vs 新总结：构造 fullPrompt
+  let fullPrompt = prompt;
+  let parentMessageId = null;
+  if (!fullPrompt) {
+    fullPrompt = markdown;
+    parentMessageId = dsLastMessageId;
+  } else {
+    dsLastMessageId = null;
+    try {
+      const stored = await chrome.storage.local.get('bivinote_settings');
+      const savedSettings = stored.bivinote_settings || {};
+      let sysPrompt = savedSettings.deepseekPrompt;
+      if (!sysPrompt) sysPrompt = DS_DEFAULT_PROMPT;
+      if (sysPrompt.includes('{markdown}')) {
+        fullPrompt = sysPrompt.replace('{markdown}', markdown);
+      } else {
+        fullPrompt = sysPrompt + '\n\n' + markdown;
+      }
+    } catch {
+      fullPrompt = DS_DEFAULT_PROMPT.replace('{markdown}', markdown);
+    }
+  }
+
+  // 优先走直连通道（无需标签页），失败则回退到标签页注入
+  try {
+    await dsDirectSend(fullPrompt, dsChatId, requestId, parentMessageId);
+    return; // 直连成功
+  } catch (directErr) {
+    if (!directErr.message || !directErr.message.startsWith('NEED_TAB_FALLBACK:')) {
+      // 非 PoW 回退的异常已经由 dsDirectSend 内部处理并 forward error，不重复报错
+      return;
+    }
+    // 不支持的 PoW 算法 → 回退到标签页注入
+    console.warn('[BiViNote] 直连通道不支持 PoW 算法，回退到标签页模式:', directErr.message);
+  }
+
+  // ── 回退：标签页注入模式 ──
   let tab;
   try {
     tab = await dsEnsureTab();
@@ -580,29 +914,16 @@ async function dsHandleSend(markdown, prompt, requestId) {
     return;
   }
 
-  let fullPrompt = prompt;
-  try {
-    const stored = await chrome.storage.local.get('deepseekPrompt');
-    const sysPrompt = stored.deepseekPrompt || DS_DEFAULT_PROMPT;
-    if (sysPrompt.includes('{markdown}')) {
-      fullPrompt = sysPrompt.replace('{markdown}', markdown);
-    } else {
-      fullPrompt = sysPrompt + '\n\n' + markdown;
-    }
-  } catch {
-    fullPrompt = DS_DEFAULT_PROMPT.replace('{markdown}', markdown);
-  }
-
   chrome.tabs.sendMessage(tab.id, {
     type: 'ds-inject-request',
-    payload: { prompt: fullPrompt, chatId: dsChatId, requestId }
+    payload: { prompt: fullPrompt, chatId: dsChatId, requestId, parentMessageId }
   }).catch((e) => {
     if (String(e).includes('Receiving end does not exist')) {
       dsInjectedTabs.delete(tab.id);
       dsInjectScripts(tab.id).then(() => {
         chrome.tabs.sendMessage(tab.id, {
           type: 'ds-inject-request',
-          payload: { prompt: fullPrompt, chatId: dsChatId, requestId }
+          payload: { prompt: fullPrompt, chatId: dsChatId, requestId, parentMessageId }
         });
       });
     } else {
@@ -745,5 +1066,341 @@ function dsCreateSSEProcessor() {
   }
 
   return { processChunk, flush, getChatId: () => chatId, getMessageId: () => messageId };
+}
+
+// ════════════════════════════════════════════════════════════════
+// 通道 C：DeepSeek 直连通道（无需持久标签页）
+// ════════════════════════════════════════════════════════════════
+
+let dsAuthToken = null;
+
+// 从 DeepSeek 标签页提取 token（临时打开后关闭，含重试）
+async function dsEnsureToken() {
+  if (dsAuthToken) return dsAuthToken;
+
+  const tabs = await chrome.tabs.query({ url: '*://chat.deepseek.com/*' });
+  let tab = tabs.length > 0 ? tabs[0] : null;
+  let needCleanup = false;
+
+  if (!tab) {
+    tab = await chrome.tabs.create({ url: DS_URL, active: false });
+    await dsWaitTabComplete(tab.id, 20000);
+    needCleanup = true;
+  }
+
+  // 重试提取 token（给 SPA 时间从 cookie 恢复会话）
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func: () => {
+          function tryGetToken(raw) {
+            if (!raw || typeof raw !== 'string' || raw.length <= 10) return null;
+            try {
+              const parsed = JSON.parse(raw);
+              if (typeof parsed === 'string' && parsed.length > 10) return parsed;
+              if (typeof parsed === 'object' && parsed !== null) {
+                const t = parsed.token || parsed.value || parsed.access_token || parsed.jwt;
+                return (t && typeof t === 'string' && t.length > 10) ? t : null;
+              }
+            } catch { return raw; }
+            return null;
+          }
+          const keys = ['userToken', 'token', 'ds_token', 'auth_token', 'access_token', 'jwt'];
+          for (const key of keys) {
+            const t = tryGetToken(localStorage.getItem(key));
+            if (t) return t;
+          }
+          return null;
+        },
+      });
+      dsAuthToken = results?.[0]?.result || null;
+      if (dsAuthToken) break;
+    } catch {}
+    if (attempt < 4) await new Promise(r => setTimeout(r, 1500));
+  }
+
+  if (needCleanup) {
+    chrome.tabs.remove(tab.id).catch(() => {});
+  }
+
+  return dsAuthToken;
+}
+
+// SHA-256 PoW 求解器（纯 JS，可在 Service Worker 中运行）
+async function dsSolvePowSha256(salt, challenge, difficulty) {
+  const encoder = new TextEncoder();
+  const targetBits = difficulty > 64 ? Math.floor(Math.log2(difficulty)) : difficulty;
+  for (let nonce = 0; nonce < 1000000; nonce++) {
+    const data = encoder.encode(salt + challenge + nonce);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = new Uint8Array(hashBuffer);
+    const hex = Array.from(hashArray, (b) => b.toString(16).padStart(2, '0')).join('');
+    let leadingZeros = 0;
+    for (const ch of hex) {
+      const bits = parseInt(ch, 16);
+      if (bits === 0) {
+        leadingZeros += 4;
+      } else {
+        leadingZeros += Math.clz32(bits) - 28;
+        break;
+      }
+    }
+    if (leadingZeros >= targetBits) return nonce;
+  }
+  return -1;
+}
+
+// 从 API 响应中解析 PoW 挑战
+function dsParsePowChallenge(respJson) {
+  const data = respJson.data;
+  const bizData = data && typeof data === 'object' ? data.biz_data : undefined;
+  let challenge = (bizData && bizData.challenge) || (data && data.challenge) || respJson.challenge;
+  if ((!challenge || typeof challenge !== 'object') && bizData && bizData.algorithm && bizData.salt) {
+    challenge = bizData;
+  }
+  if ((!challenge || typeof challenge !== 'object') && data && typeof data === 'object' && data.algorithm && data.salt) {
+    challenge = data;
+  }
+  if (!challenge || typeof challenge !== 'object') return null;
+  const c = challenge;
+  if (
+    typeof c.algorithm !== 'string' ||
+    typeof c.challenge !== 'string' ||
+    typeof c.difficulty !== 'number' ||
+    typeof c.salt !== 'string' ||
+    typeof c.signature !== 'string'
+  ) return null;
+  // 补充 expire_at（外层 data / biz_data / raw）
+  if (c.expire_at === undefined) {
+    const d = respJson.data;
+    const biz = d && typeof d === 'object' ? d.biz_data : undefined;
+    c.expire_at = (biz?.expire_at) ?? (d?.expire_at) ?? respJson.expire_at ?? 0;
+  }
+  return c;
+}
+
+// DeepSeekHashV1 PoW 求解器（临时标签页 + WASM，求解后立即关闭）
+async function dsSolvePowDeepSeekHashV1(powChallenge) {
+  // 找现有 DeepSeek 标签页或创建临时标签页
+  const tabs = await chrome.tabs.query({ url: '*://chat.deepseek.com/*' });
+  let tab = tabs.length > 0 ? tabs[0] : null;
+  let needCleanup = false;
+
+  if (!tab) {
+    tab = await chrome.tabs.create({ url: DS_URL, active: false });
+    await dsWaitTabComplete(tab.id, 20000);
+    needCleanup = true;
+  }
+
+  try {
+    // 注入 WASM 求解器（如尚未注入）
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        files: ['libs/wasm-solver.js'],
+      });
+    } catch {}
+
+    // 在标签页中求解 PoW
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: (pc) => {
+        if (typeof window.solvePowDeepSeekHashV1 !== 'function') return -1;
+        return window.solvePowDeepSeekHashV1(pc).catch(() => -1);
+      },
+      args: [powChallenge],
+    });
+
+    return results?.[0]?.result ?? -1;
+  } finally {
+    if (needCleanup) {
+      chrome.tabs.remove(tab.id).catch(() => {});
+    }
+  }
+}
+
+// DeepSeek API 直连（无需持久标签页）
+async function dsDirectSend(prompt, chatId, requestId, parentMessageId) {
+  const forward = (msg) => dsSendToBilibiliTab({ ...msg, requestId });
+
+  try {
+    // 1. 获取 token
+    const token = await dsEnsureToken();
+    if (!token) {
+      forward({ type: 'ds-error', error: '未获取到 DeepSeek 认证 Token，请先登录 chat.deepseek.com' });
+      return;
+    }
+
+    const headers = {
+      'Content-Type': 'application/json',
+      Accept: '*/*',
+      Referer: 'https://chat.deepseek.com/',
+      Origin: 'https://chat.deepseek.com',
+      'x-client-platform': 'web',
+      'x-client-version': '1.7.0',
+      'x-app-version': '20241129.1',
+      Authorization: `Bearer ${token}`,
+    };
+
+    // 2. 创建/复用会话
+    let sessionId = chatId;
+    let sessionInvalid = false;
+    const processor = dsCreateSSEProcessor();
+
+    for (let retry = 0; retry <= 1; retry++) {
+      sessionInvalid = false;
+
+      if (!sessionId) {
+        const res = await fetch('https://chat.deepseek.com/api/v0/chat_session/create', {
+          method: 'POST', headers, credentials: 'include',
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) {
+          forward({ type: 'ds-error', error: `创建会话失败: HTTP ${res.status}` });
+          return;
+        }
+        const json = await res.json();
+        const d = json.data;
+        const biz = d && typeof d === 'object' ? d.biz_data : undefined;
+        sessionId = (biz && biz.id) || (d && d.id) || (d && d.chat_session_id) || '';
+        if (!sessionId) {
+          forward({ type: 'ds-error', error: '创建会话失败: 返回格式异常' });
+          return;
+        }
+        dsUpdateChatId(sessionId);
+      }
+
+      // 3. 获取 PoW 挑战
+      const powRes = await fetch('https://chat.deepseek.com/api/v0/chat/create_pow_challenge', {
+        method: 'POST', headers, credentials: 'include',
+        body: JSON.stringify({ target_path: '/api/v0/chat/completion' }),
+      });
+      if (!powRes.ok) {
+        forward({ type: 'ds-error', error: `获取 PoW 挑战失败: HTTP ${powRes.status}` });
+        return;
+      }
+      const powJson = await powRes.json();
+      console.log('[BiViNote] PoW response:', JSON.stringify(powJson).slice(0, 500));
+      // 尝试多种方式解析 PoW 挑战
+      let powChallenge = dsParsePowChallenge(powJson);
+      if (!powChallenge && powJson.data) {
+        // 直接使用 data 对象（部分 API 版本）
+        const d = powJson.data;
+        const biz = d.biz_data || d;
+        if (biz.algorithm && biz.challenge !== undefined) {
+          powChallenge = { ...biz };
+          if (powChallenge.expire_at === undefined) powChallenge.expire_at = d.expire_at || 0;
+        }
+      }
+      if (!powChallenge) {
+        forward({ type: 'ds-error', error: 'PoW 挑战格式异常: ' + JSON.stringify(powJson).slice(0, 200) });
+        return;
+      }
+
+      // 4. 求解 PoW（支持 SHA-256 和 DeepSeekHashV1）
+      let answer;
+      if (powChallenge.algorithm === 'sha256') {
+        answer = await dsSolvePowSha256(powChallenge.salt, powChallenge.challenge, powChallenge.difficulty);
+      } else if (powChallenge.algorithm === 'DeepSeekHashV1') {
+        answer = await dsSolvePowDeepSeekHashV1(powChallenge);
+      } else {
+        throw new Error(`NEED_TAB_FALLBACK: ${powChallenge.algorithm}`);
+      }
+
+      if (!isFinite(answer) || answer < 0) {
+        forward({ type: 'ds-error', error: 'PoW 求解失败' });
+        return;
+      }
+
+      // 5. 发送消息
+      dsAbortController = new AbortController();
+      const powResponse = btoa(JSON.stringify({ ...powChallenge, answer, target_path: '/api/v0/chat/completion' }));
+
+      const completionRes = await fetch('https://chat.deepseek.com/api/v0/chat/completion', {
+        method: 'POST',
+        headers: { ...headers, 'x-ds-pow-response': powResponse },
+        credentials: 'include',
+        signal: dsAbortController.signal,
+        body: JSON.stringify({
+          chat_session_id: sessionId,
+          parent_message_id: parentMessageId || null,
+          prompt,
+          ref_file_ids: [],
+          thinking_enabled: true,
+          search_enabled: false,
+          preempt: false,
+        }),
+      });
+
+      if (!completionRes.ok) {
+        const text = await completionRes.text().catch(() => '');
+        if (text.includes('invalid chat session id')) { sessionInvalid = true; }
+        else {
+          forward({ type: 'ds-error', error: `HTTP ${completionRes.status}: ${text.slice(0, 200)}` });
+          return;
+        }
+      }
+
+      // 6. 流式读取 SSE
+      if (completionRes.ok && completionRes.body) {
+        const reader = completionRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        // 先发送 sessionId
+        if (sessionId) {
+          processor.processChunk(`data: ${JSON.stringify({ type: 'deepseek:chat_session_id', chat_session_id: sessionId })}\n\n`);
+        }
+
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          while (buffer.includes('\n')) {
+            const idx = buffer.indexOf('\n');
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (line.startsWith('data: ')) {
+              const chunk = line + '\n\n';
+              const text = processor.processChunk(chunk);
+              const cId = processor.getChatId();
+              const mId = processor.getMessageId();
+              if (mId) dsUpdateLastMessageId(mId);
+              if (cId) dsUpdateChatId(cId);
+              if (text) forward({ type: 'ds-chunk', text, chatId: cId });
+            }
+          }
+        }
+
+        const tail = processor.flush();
+        if (tail) forward({ type: 'ds-chunk', text: tail });
+        forward({ type: 'ds-done' });
+        break;
+      }
+
+      // 会话失效重试
+      if (sessionInvalid && retry === 0) {
+        sessionId = null;
+        parentMessageId = null;
+        continue;
+      }
+      break;
+    }
+  } catch (e) {
+    if (e.message && e.message.startsWith('NEED_TAB_FALLBACK:')) {
+      throw e; // 让调用方决定回退
+    }
+    // AbortError 是用户主动停止，不报错
+    if (e.name !== 'AbortError') {
+      forward({ type: 'ds-error', error: `直连异常: ${String(e)}` });
+    }
+  } finally {
+    dsAbortController = null;
+  }
 }
 

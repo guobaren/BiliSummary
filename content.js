@@ -7,6 +7,43 @@
 
   const BN = window.BiViNote;
 
+  // ── 浮动图标 ──
+
+  let floatIconEl = null;
+
+  function createFloatIcon() {
+    if (floatIconEl) return;
+    floatIconEl = document.createElement('div');
+    floatIconEl.className = 'bn-float-icon';
+    floatIconEl.setAttribute('data-testid', 'bn-float-icon');
+    const img = document.createElement('img');
+    img.src = chrome.runtime.getURL('icons/icon-32.png');
+    img.alt = 'BiliSumi';
+    floatIconEl.appendChild(img);
+    floatIconEl.addEventListener('click', () => {
+      if (BN.state.panelVisible) {
+        BN.panel.hide();
+      } else {
+        BN.panel.show();
+      }
+    });
+    document.body.appendChild(floatIconEl);
+    updateFloatIconVisibility();
+  }
+
+  function updateFloatIconVisibility() {
+    if (!floatIconEl) return;
+    const enabled = BN.state.settings.floatIconEnabled !== false;
+    floatIconEl.classList.toggle('bn-hidden', !enabled);
+  }
+
+  function hideFloatIcon() {
+    if (floatIconEl) floatIconEl.classList.add('bn-hidden');
+  }
+
+  // 暴露给 panel 模块使用
+  BN.floatIcon = { create: createFloatIcon, update: updateFloatIconVisibility, hide: hideFloatIcon };
+
   // ── 初始化 ──
 
   async function init() {
@@ -14,26 +51,22 @@
       // 加载设置
       await BN.settings.load();
 
+      // 创建浮动图标
+      createFloatIcon();
+
       // 监听 background 消息（toggle-panel）
       chrome.runtime.onMessage.addListener((message) => {
         if (message.type === 'toggle-panel') {
           const s = BN.state;
-          // 如果有东西显示着，先隐藏
           if (s.panelVisible) {
             BN.panel.hide();
             return;
           }
-          if (s.collapsed) {
-            BN.panel.hideCollapse();
-            return;
-          }
-          // 都没显示，按上次使用的模式打开
-          const lastMode = s.settings.lastOpenMode || 'panel';
-          if (lastMode === 'menu') {
-            BN.panel.toggleCollapse();
-          } else {
-            BN.panel.show();
-          }
+          BN.panel.show();
+        }
+        if (message.type === 'float-icon-toggle') {
+          BN.state.settings.floatIconEnabled = message.enabled !== false;
+          updateFloatIconVisibility();
         }
       });
 
@@ -52,7 +85,9 @@
       onRouteChange();
     }
   });
-  urlObserver.observe(document.body, { childList: true, subtree: true });
+  if (document.body) {
+    urlObserver.observe(document.body, { childList: true, subtree: true });
+  }
 
   let lastBvid = '';
   let lastPage = 1;
@@ -60,9 +95,7 @@
   function onRouteChange() {
     const oldBvid = lastBvid;
     const oldPage = lastPage;
-    // 重置状态
     BN.state.reset();
-    // 如果面板可见，检测 BVID 或分P 变化则自动刷新
     if (BN.state.panelVisible && BN.subtitle) {
       const newBvid = BN.subtitle.extractBvid(location.href);
       const newPage = BN.subtitle.extractPageIndex(location.href);
@@ -72,8 +105,6 @@
         setTimeout(async () => {
           if (BN.state.panelVisible) {
             await BN.subtitle.refresh();
-            BN.panel.resetDocAuto();
-            BN.panel.renderDoc();
           }
         }, 1000);
       }

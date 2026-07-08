@@ -140,7 +140,7 @@
 
   // ========== 核心：发送消息并流式接收回复 ==========
 
-  async function sendDeepSeekMessage(prompt, chatId, requestId) {
+  async function sendDeepSeekMessage(prompt, chatId, requestId, parentMessageId) {
     try {
     const origin = window.location.origin;
 
@@ -290,7 +290,7 @@
         credentials: "include",
         body: JSON.stringify({
           chat_session_id: sessionId,
-          parent_message_id: null,
+          parent_message_id: parentMessageId || null,
           prompt,
           ref_file_ids: [],
           thinking_enabled: true,
@@ -400,6 +400,7 @@
     // 会话失效，清除 chatId 并重试
     if (sessionInvalid && retry === 0) {
       sessionId = null;
+      parentMessageId = null; // 新会话无 parent
       postToExtension("DEEPSEEK_CHUNK", { requestId, chunk: "data: [会话已失效，正在重新创建...]\n\n" });
       continue;
     }
@@ -446,8 +447,8 @@
     if (!msg) return;
 
     if (msg.type === "DEEPSEEK_SEND") {
-      const { prompt, chatId, requestId } = msg;
-      sendDeepSeekMessage(prompt, chatId, requestId || crypto.randomUUID());
+      const { prompt, chatId, requestId, parentMessageId } = msg;
+      sendDeepSeekMessage(prompt, chatId, requestId || crypto.randomUUID(), parentMessageId);
     } else if (msg.type === "DEEPSEEK_ABORT") {
       stopStream(msg.chatId, msg.messageId);
     }

@@ -10,33 +10,45 @@
   const DEFAULTS = {
     fontSize: 'default',
     lineHeight: 'standard',
-    frameStep: 0.2,
     autoScroll: true,
     darkMode: false,
-    pauseOnPreview: true,
     subtitleLang: '',
-    downloadDir: '',
-    promptNoImage: '',
-    promptWithImage: '',
-    lastOpenMode: 'panel',
-    docOrganizeMode: 'auto',
-    deepseekPrompt: ''
-  };
+    deepseekPrompt: `你是一个视频内容总结助手，根据用户提供的字幕文本生成结构化、易读的视频总结。
 
-  const DEFAULT_CHECKED = {
-    title: true,
-    author: true,
-    date: true,
-    duration: true,
-    url: true,
-    description: true,
-    chapterTimestamp: false,
-    subtitleTimestamp: false
+输出格式要求：
+
+视频总结标题：基于视频主题提炼一个精炼、有吸引力的标题。
+
+UP主信息：提取作者名称。
+
+核心观点概述：用1-2句话概括视频的核心主旨或UP主最想传达的观点。
+
+主要内容分点整理：按章节或主题分点整理。每个大点需有明确的小标题（如“1. 安装与登录”），小标题下使用简洁的要点或短句展开说明。保留所有技术名词、工具名、框架名、产品名。删除口语化内容、重复内容，修正错别字，合并连续字幕为连贯语句。
+
+额外约束：
+
+不要新增原文不存在的技术细节或扩展知识，仅整理原文信息。
+
+每个知识点下可包含子要点（使用短横线“-”或编号），但总层级不超过两级。
+
+待总结字幕：
+
+{markdown}
+
+直接输出整理后的内容，不要输出任何额外说明文字。`,
+    aiChannel: 'browser',   // 'browser' | 'api'
+    floatIconEnabled: true, // 浮动图标常驻
+    apiCfg: {
+      endpoint: 'https://api.deepseek.com/v1/chat/completions',
+      apiKey: '',
+      model: 'deepseek-v4-flash',
+      stream: true,
+    },
   };
 
   async function load() {
     return new Promise(resolve => {
-      chrome.storage.local.get(['bivinote_settings', 'bivinote_videoInfoChecked'], result => {
+      chrome.storage.local.get(['bivinote_settings'], result => {
         if (chrome.runtime.lastError) {
           console.warn('[BiViNote] Storage load error:', chrome.runtime.lastError);
           resolve({ ...DEFAULTS });
@@ -44,10 +56,17 @@
         }
         const saved = result.bivinote_settings || {};
         Object.assign(window.BiViNote.state.settings, { ...DEFAULTS, ...saved });
-
-        const savedChecked = result.bivinote_videoInfoChecked || {};
-        Object.assign(window.BiViNote.state.videoInfoChecked, { ...DEFAULT_CHECKED, ...savedChecked });
-
+        // 特殊处理 deepseekPrompt：如果 storage 里存的是空字符串（老版本遗留），
+        // 说明用户未自定义，应恢复为默认提示词
+        if (!saved.deepseekPrompt) {
+          window.BiViNote.state.settings.deepseekPrompt = DEFAULTS.deepseekPrompt;
+        }
+        // 确保 apiCfg 存在
+        if (!window.BiViNote.state.settings.apiCfg) {
+          window.BiViNote.state.settings.apiCfg = { ...DEFAULTS.apiCfg };
+        } else {
+          Object.assign(window.BiViNote.state.settings.apiCfg, { ...DEFAULTS.apiCfg, ...saved.apiCfg });
+        }
         resolve(window.BiViNote.state.settings);
       });
     });
@@ -56,10 +75,8 @@
   async function save() {
     return new Promise(resolve => {
       const settings = window.BiViNote.state.settings;
-      const checked = window.BiViNote.state.videoInfoChecked;
       chrome.storage.local.set({
         bivinote_settings: { ...settings },
-        bivinote_videoInfoChecked: { ...checked }
       }, () => {
         if (chrome.runtime.lastError) {
           console.warn('[BiViNote] Storage save error:', chrome.runtime.lastError);
@@ -72,12 +89,10 @@
   function resetDefaults() {
     const s = window.BiViNote.state.settings;
     const preserved = {
-      promptNoImage: s.promptNoImage,
-      promptWithImage: s.promptWithImage,
       deepseekPrompt: s.deepseekPrompt,
+      apiCfg: s.apiCfg,
     };
     Object.assign(s, { ...DEFAULTS }, preserved);
-    Object.assign(window.BiViNote.state.videoInfoChecked, { ...DEFAULT_CHECKED });
     save();
   }
 
