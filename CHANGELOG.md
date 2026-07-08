@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.1] - 2026-07-09
+
+### Changed
+- 更新 README 与 docs 落地页，新增 DeepSeek 快速/专家模式功能描述
+
 ## [1.1.0] - 2026-07-09
 
 ### Added

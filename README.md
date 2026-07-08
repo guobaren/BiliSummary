@@ -12,7 +12,7 @@ BiliSummary 是一个 Chrome 扩展，在 B 站视频页抓取字幕并接入 AI
 - **章节支持** — 展示视频章节，点击跳转
 - **字幕同步** — 播放时高亮当前字幕，支持自动滚动
 - **AI 总结** — 两种通道可选：
-  - **DeepSeek 浏览器 SDK**：登录 chat.deepseek.com 后使用，浏览器端直连 API
+  - **DeepSeek 浏览器 SDK**：登录 chat.deepseek.com 后使用，浏览器端直连 API，支持快速/专家模式切换
   - **通用 API 通道**：配置 Endpoint/API Key，兼容 OpenAI / Anthropic / Google / 本地 LLM 等
 - **流式输出** — AI 思考过程和总结结果实时显示
 - **追问功能** — 总结完成后可继续追问
@@ -53,6 +53,7 @@ git clone https://github.com/guobaren/BiliSummary.git
 - 需要先登录 [chat.deepseek.com](https://chat.deepseek.com)
 - 扩展自动检测登录状态，无需手动配置
 - 首次使用会打开 DeepSeek 标签页提取认证信息
+- 支持**快速模式**与**专家模式**切换：快速模式响应更快，专家模式启用深度思考（可在设置页 DeepSeek 选项下切换）
 
 **自定义接口：**
 
@@ -67,7 +68,7 @@ git clone https://github.com/guobaren/BiliSummary.git
 | ----- | ------------------------------------ |
 | AI 总结 | AI 总结、流式输出、追问                        |
 | 字幕    | 字幕列表、复制、跳转、高亮同步                      |
-| 设置    | 字幕语言、字体大小、行高、夜间模式、AI 通道、API 配置、提示词管理 |
+| 设置    | 字幕语言、字体大小、行高、夜间模式、AI 通道、API 配置、提示词管理、DeepSeek 快速/专家模式 |
 
 ## 项目结构
 
