@@ -15,8 +15,15 @@ window.__deepseekApiVersion = 'v20260709-5';
       const parsed = JSON.parse(raw);
       if (typeof parsed === "string" && parsed.length > 10) return parsed;
       if (typeof parsed === "object" && parsed !== null) {
-        const t = parsed.token || parsed.value || parsed.access_token || parsed.jwt;
-        return (t && typeof t === "string" && t.length > 10) ? t : null;
+        let t = parsed.token || parsed.access_token || parsed.jwt;
+        if (t && typeof t === "string" && t.length > 10) return t;
+        if (parsed.value) {
+          if (typeof parsed.value === "string" && parsed.value.length > 10) return parsed.value;
+          if (typeof parsed.value === "object") {
+            t = parsed.value.token || parsed.value.settingsToken || parsed.value.access_token;
+            if (t && typeof t === "string" && t.length > 10) return t;
+          }
+        }
       }
     } catch {
       return raw;
@@ -38,6 +45,45 @@ window.__deepseekApiVersion = 'v20260709-5';
         const lower = k.toLowerCase();
         if (lower.includes("token") || lower.includes("auth") || lower.includes("jwt")) {
           const t = tryGetToken(localStorage.getItem(k));
+          if (t) return t;
+        }
+      }
+    } catch {}
+    return null;
+  }
+
+  function extractToken(raw) {
+    if (!raw || typeof raw !== 'string' || raw.length <= 10) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'string' && parsed.length > 10) return parsed;
+      if (typeof parsed === 'object' && parsed !== null) {
+        let t = parsed.token || parsed.access_token || parsed.jwt;
+        if (t && typeof t === 'string' && t.length > 10) return t;
+        if (parsed.value) {
+          if (typeof parsed.value === 'string' && parsed.value.length > 10) return parsed.value;
+          if (typeof parsed.value === 'object') {
+            t = parsed.value.token || parsed.value.settingsToken || parsed.value.access_token;
+            if (t && typeof t === 'string' && t.length > 10) return t;
+          }
+        }
+      }
+    } catch { return raw; }
+    return null;
+  }
+
+  function getSettingsToken() {
+    try {
+      const st = localStorage.getItem('settingsToken');
+      const t = extractToken(st);
+      if (t) return t;
+    } catch {}
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.toLowerCase().includes('setting')) {
+          const v = localStorage.getItem(k);
+          const t = extractToken(v);
           if (t) return t;
         }
       }
@@ -109,18 +155,11 @@ window.__deepseekApiVersion = 'v20260709-5';
   // 获取页面版本信息
   function getPageVersions() {
     let clientVersion = "2.2.0";
-    let appVersion = "20250601.1";
     try {
-      const meta = document.querySelector('meta[name="version"]');
-      if (meta && meta.getAttribute("content")) appVersion = meta.getAttribute("content");
-      const nextData = window.__NEXT_DATA__;
-      if (nextData && nextData.buildId) appVersion = nextData.buildId;
-      const appVer = window.__APP_VERSION__;
-      if (appVer) appVersion = appVer;
       const clientVer = window.__CLIENT_VERSION__;
       if (clientVer) clientVersion = clientVer;
     } catch {}
-    return { clientVersion, appVersion };
+    return { clientVersion };
   }
 
   // 发送消息到 content script（中转给 background）
@@ -157,17 +196,22 @@ window.__deepseekApiVersion = 'v20260709-5';
       trace(requestId, "2-token-ok");
 
       // 构造请求头
-      const { clientVersion, appVersion } = getPageVersions();
+      const { clientVersion } = getPageVersions();
+      const tzOffset = -new Date().getTimezoneOffset() * 60;
+      const settingsToken = getSettingsToken();
       const headers = {
         "Content-Type": "application/json",
         Accept: "*/*",
         Referer: "https://chat.deepseek.com/",
         Origin: "https://chat.deepseek.com",
+        "x-client-bundle-id": "com.deepseek.chat",
+        "x-client-locale": "zh_CN",
         "x-client-platform": "web",
+        "x-client-timezone-offset": String(tzOffset),
         "x-client-version": clientVersion,
-        "x-app-version": appVersion,
         Authorization: `Bearer ${token}`,
       };
+      if (settingsToken) headers["x-settings-token"] = settingsToken;
 
       // 2. 创建会话（始终创建新会话）
       let sessionId = null;
@@ -446,20 +490,26 @@ window.__deepseekApiVersion = 'v20260709-5';
   async function stopStream(chatId, messageId) {
     const token = getToken();
     if (!token || !chatId) return;
-    const { clientVersion, appVersion } = getPageVersions();
+    const { clientVersion } = getPageVersions();
+    const tzOffset = -new Date().getTimezoneOffset() * 60;
+    const settingsToken = getSettingsToken();
     try {
+      const headers = {
+        "Content-Type": "application/json",
+        Accept: "*/*",
+        Referer: "https://chat.deepseek.com/",
+        Origin: "https://chat.deepseek.com",
+        "x-client-bundle-id": "com.deepseek.chat",
+        "x-client-locale": "zh_CN",
+        "x-client-platform": "web",
+        "x-client-timezone-offset": String(tzOffset),
+        "x-client-version": clientVersion,
+        Authorization: `Bearer ${token}`,
+      };
+      if (settingsToken) headers["x-settings-token"] = settingsToken;
       await fetch("https://chat.deepseek.com/api/v0/chat/stop_stream", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "*/*",
-          Referer: "https://chat.deepseek.com/",
-          Origin: "https://chat.deepseek.com",
-          "x-client-platform": "web",
-          "x-client-version": clientVersion,
-          "x-app-version": appVersion,
-          Authorization: `Bearer ${token}`,
-        },
+        headers,
         credentials: "include",
         body: JSON.stringify({ chat_session_id: chatId, message_id: messageId }),
       });

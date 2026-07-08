@@ -829,6 +829,15 @@
           </div>
         </div>
 
+        <div class="bn-clear-history-section">
+          <div class="bn-clear-history-row">
+            <button class="bn-setting-btn bn-btn-danger" id="bn-scan-sessions-btn">清除插件历史对话</button>
+            <span class="bn-clear-history-desc" id="bn-clear-history-desc"></span>
+          </div>
+          <div class="bn-clear-history-status" id="bn-clear-history-status"></div>
+          <div class="bn-scan-progress" id="bn-scan-progress" style="display:none"></div>
+        </div>
+
         <div class="bn-about">
           <div class="bn-about-divider"></div>
           <div class="bn-about-version">BiliSummary <span id="bn-version"></span></div>
@@ -975,6 +984,150 @@
         panelEl.setAttribute('data-bn-theme', '');
         showToast('已恢复默认设置');
       });
+    }
+
+    // ── 清除历史对话 ──
+    const scanSessionsBtn = panelEl.querySelector('#bn-scan-sessions-btn');
+    const clearStatus = panelEl.querySelector('#bn-clear-history-status');
+    const scanProgressEl = panelEl.querySelector('#bn-scan-progress');
+    let scannedSessionIds = [];
+    let isScanning = false;
+    let scanPromise = null;
+    const BTN_DEFAULT = '清除插件历史对话';
+    const SCAN_LIMIT = 40;
+    const descEl = panelEl.querySelector('#bn-clear-history-desc');
+    if (descEl) descEl.textContent = `扫描最近 ${SCAN_LIMIT} 次对话，删除所有由插件生成的记录`;
+    const BTN_STOP = '停止扫描';
+
+    if (scanSessionsBtn) {
+      // 接收扫描进度
+      chrome.runtime.onMessage.addListener((message) => {
+        if (message.type === 'ds-scan-progress' && isScanning) {
+          scanProgressEl.style.display = '';
+          scanProgressEl.textContent = `[${message.checked}/${message.total}] ${message.current || ''}`;
+        }
+      });
+
+      scanSessionsBtn.addEventListener('click', async () => {
+        // 正在扫描中 → 中止
+        if (isScanning) {
+          scanSessionsBtn.disabled = true;
+          scanSessionsBtn.textContent = '正在停止...';
+          try {
+            await chrome.runtime.sendMessage({ type: 'ds-abort-scan' });
+            if (scanPromise) {
+              try {
+                const resp = await scanPromise;
+                handleScanResult(resp);
+                scanPromise = null;
+                return;
+              } catch (e) {
+                clearStatus.textContent = '扫描请求失败: ' + e.message;
+                clearStatus.className = 'bn-clear-history-status bn-status-err';
+              }
+            }
+          } catch (e) { /* ignore */ }
+          resetScanButton();
+          scanPromise = null;
+          return;
+        }
+
+        isScanning = true;
+        scanSessionsBtn.disabled = false;
+        scanSessionsBtn.textContent = BTN_STOP;
+        scanSessionsBtn.classList.add('bn-btn-danger');
+        clearStatus.textContent = '';
+        clearStatus.className = 'bn-clear-history-status';
+        scanProgressEl.style.display = '';
+        scanProgressEl.textContent = '正在扫描...';
+        scannedSessionIds = [];
+
+        scanPromise = chrome.runtime.sendMessage({ type: 'ds-scan-sessions', limit: SCAN_LIMIT });
+        try {
+          const resp = await scanPromise;
+          handleScanResult(resp);
+        } catch (e) {
+          if (!isScanning) return;
+          clearStatus.textContent = '扫描请求失败: ' + e.message;
+          clearStatus.className = 'bn-clear-history-status bn-status-err';
+          resetScanButton();
+        }
+        scanPromise = null;
+      });
+    }
+
+    function handleScanResult(resp) {
+      if (!resp || !resp.ok) {
+        let errMsg = '扫描失败: ' + (resp?.error || '未知错误');
+        if (resp?._html) {
+          errMsg += '\n\n服务器返回的 HTML:\n' + resp._html;
+        }
+        clearStatus.textContent = errMsg;
+        clearStatus.className = 'bn-clear-history-status bn-status-err';
+        resetScanButton();
+        return;
+      }
+
+      const count = resp.sessionIds.length;
+      scannedSessionIds = resp.sessionIds;
+
+      if (resp.aborted) {
+        if (count === 0) {
+          clearStatus.textContent = '扫描已停止，已检查部分对话，未发现插件生成的对话';
+          clearStatus.className = 'bn-clear-history-status bn-status-ok';
+        } else {
+          clearStatus.innerHTML = `扫描已停止，发现 <b>${count}</b> 次插件生成的对话<br><button class="bn-setting-btn bn-btn-danger" id="bn-clear-sessions-btn" style="margin-top:8px">确认删除 ${count} 次对话</button>`;
+          clearStatus.className = 'bn-clear-history-status bn-status-warn';
+          bindDeleteButton(clearStatus);
+        }
+        resetScanButton();
+        return;
+      }
+
+      if (count === 0) {
+        clearStatus.textContent = `已扫描 ${resp.total} 次对话，未发现插件生成的对话`;
+        clearStatus.className = 'bn-clear-history-status bn-status-ok';
+      } else {
+        clearStatus.innerHTML = `已扫描 ${resp.total} 次对话，发现 <b>${count}</b> 次插件生成的对话<br><button class="bn-setting-btn bn-btn-danger" id="bn-clear-sessions-btn" style="margin-top:8px">确认删除 ${count} 次对话</button>`;
+        clearStatus.className = 'bn-clear-history-status bn-status-warn';
+        bindDeleteButton(clearStatus);
+      }
+      resetScanButton();
+    }
+
+    function resetScanButton() {
+      isScanning = false;
+      scanSessionsBtn.textContent = BTN_DEFAULT;
+      scanSessionsBtn.classList.remove('bn-btn-danger');
+      scanSessionsBtn.disabled = false;
+      scanProgressEl.style.display = 'none';
+    }
+
+    function bindDeleteButton(container) {
+      const clearBtn = container.querySelector('#bn-clear-sessions-btn');
+      if (clearBtn) {
+        clearBtn.addEventListener('click', async () => {
+          clearBtn.disabled = true;
+          clearBtn.textContent = '正在删除...';
+          try {
+            const delResp = await chrome.runtime.sendMessage({
+              type: 'ds-delete-sessions',
+              sessionIds: scannedSessionIds
+            });
+            if (!delResp || !delResp.ok) {
+              clearStatus.innerHTML = '删除失败: ' + (delResp?.error || '未知错误');
+              clearStatus.className = 'bn-clear-history-status bn-status-err';
+            } else {
+              clearStatus.innerHTML = `已删除 ${delResp.deleted} 次对话` + (delResp.failed ? `，${delResp.failed} 次失败` : '');
+              clearStatus.className = 'bn-clear-history-status bn-status-ok';
+              scannedSessionIds = [];
+            }
+          } catch (e) {
+            clearStatus.innerHTML = '删除请求失败: ' + e.message;
+            clearStatus.className = 'bn-clear-history-status bn-status-err';
+          }
+        });
+      }
     }
 
     // 字幕语言切换

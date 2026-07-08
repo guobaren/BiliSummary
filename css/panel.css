@@ -1277,3 +1277,73 @@
 .bn-ai-result ul ul ul { list-style-type: square; }
 .bn-ai-result ul ul ul ul { list-style-type: disc; }
 
+/* ── 清除历史对话 ── */
+.bn-clear-history-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--bn-border);
+}
+
+.bn-clear-history-status {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.bn-clear-history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bn-clear-history-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.bn-clear-history-status {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.bn-scan-progress {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--accent);
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.bn-status-err { background: #fdecea; color: #c0392b; border-radius: 6px; padding: 8px 10px; }
+[data-bn-theme="dark"] .bn-status-err { background: #3a1a1a; color: #e74c3c; }
+
+.bn-status-ok { background: #eafaf1; color: #27ae60; border-radius: 6px; padding: 8px 10px; }
+[data-bn-theme="dark"] .bn-status-ok { background: #1a3a1a; color: #2ecc71; }
+
+.bn-status-warn { background: #fef9e7; color: #b7950b; border-radius: 6px; padding: 8px 10px; }
+[data-bn-theme="dark"] .bn-status-warn { background: #3a351a; color: #f1c40f; }
+
+.bn-btn-danger {
+  background: #e74c3c;
+  color: #fff;
+  border-color: #c0392b;
+}
+.bn-btn-danger:hover {
+  background: #c0392b;
+}
+[data-bn-theme="dark"] .bn-btn-danger {
+  background: #c0392b;
+  color: #fff;
+  border-color: #a93226;
+}
+[data-bn-theme="dark"] .bn-btn-danger:hover {
+  background: #a93226;
+}
+

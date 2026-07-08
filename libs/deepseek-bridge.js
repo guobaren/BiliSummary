@@ -19,7 +19,7 @@ if (!window.__dsBridgeInjected) {
     const msg = event.data;
     if (!msg || !msg.type) return;
 
-    if (msg.type === 'DEEPSEEK_CHUNK' || msg.type === 'DEEPSEEK_DONE' || msg.type === 'DEEPSEEK_ERROR') {
+    if (msg.type === 'DEEPSEEK_CHUNK' || msg.type === 'DEEPSEEK_DONE' || msg.type === 'DEEPSEEK_ERROR' || msg.type === 'ds-scan-progress') {
       safeSendMessage(msg);
     }
   });

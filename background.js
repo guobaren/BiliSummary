@@ -227,6 +227,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  // ── 清除历史对话 ──
+
+  if (message.type === 'ds-scan-sessions') {
+    dsPanelTabId = sender.tab ? sender.tab.id : null;
+    dsScanPluginSessions(message.limit || 200).then(result => sendResponse(result));
+    return true;
+  }
+
+  if (message.type === 'ds-delete-sessions') {
+    dsDeleteSessions(message.sessionIds).then(result => sendResponse(result));
+    return true;
+  }
+
+  if (message.type === 'ds-abort-scan') {
+    (async () => {
+      try {
+        const tab = await dsEnsureTab();
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          world: 'MAIN',
+          func: () => { window.__dsAbortScan = true; }
+        });
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e) });
+      }
+    })();
+    return true;
+  }
+
+  // ds-scan-progress：从 DeepSeek tab 转发到 panel tab
+  if (message.type === 'ds-scan-progress' && dsPanelTabId) {
+    chrome.tabs.sendMessage(dsPanelTabId, message).catch(() => {});
+    return false;
+  }
+
   // ── DeepSeek bridge → bilibili tab 转发
   if (message.type === 'DEEPSEEK_CHUNK') {
     // 调试：记录每个到达 SW 的 chunk（取前 80 字符）
@@ -754,6 +790,7 @@ let dsChatId = null;
 let dsSseProcessors = {};
 let dsLastMessageId = null;
 let dsSenderTabs = {};
+let dsPanelTabId = null;
 let dsPendingRequest = null;
 let dsAbortController = null;
 let apiAbortController = null;
@@ -1179,6 +1216,7 @@ function dsCreateSSEProcessor() {
 // ════════════════════════════════════════════════════════════════
 
 let dsAuthToken = null;
+let dsSettingsToken = null;
 
 // 从 DeepSeek 标签页提取 token（临时打开后关闭，含重试）
 async function dsEnsureToken() {
@@ -1207,21 +1245,49 @@ async function dsEnsureToken() {
               const parsed = JSON.parse(raw);
               if (typeof parsed === 'string' && parsed.length > 10) return parsed;
               if (typeof parsed === 'object' && parsed !== null) {
-                const t = parsed.token || parsed.value || parsed.access_token || parsed.jwt;
-                return (t && typeof t === 'string' && t.length > 10) ? t : null;
+                let t = parsed.token || parsed.access_token || parsed.jwt;
+                if (t && typeof t === 'string' && t.length > 10) return t;
+                if (parsed.value) {
+                  if (typeof parsed.value === 'string' && parsed.value.length > 10) return parsed.value;
+                  if (typeof parsed.value === 'object') {
+                    t = parsed.value.token || parsed.value.settingsToken || parsed.value.access_token;
+                    if (t && typeof t === 'string' && t.length > 10) return t;
+                  }
+                }
               }
             } catch { return raw; }
             return null;
           }
+          const result = { token: null, settingsToken: null };
           const keys = ['userToken', 'token', 'ds_token', 'auth_token', 'access_token', 'jwt'];
           for (const key of keys) {
             const t = tryGetToken(localStorage.getItem(key));
-            if (t) return t;
+            if (t) { result.token = t; break; }
           }
-          return null;
+          try {
+            const st = localStorage.getItem('settingsToken');
+            if (st && st.length > 10 && st.length < 500) result.settingsToken = tryGetToken(st);
+          } catch {}
+          if (!result.settingsToken) {
+            try {
+              for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (k && k.toLowerCase().includes('setting')) {
+                  const v = localStorage.getItem(k);
+                  if (v && v.length > 10 && v.length < 500) {
+                    const t = tryGetToken(v);
+                    if (t) { result.settingsToken = t; break; }
+                  }
+                }
+              }
+            } catch {}
+          }
+          return result;
         },
       });
-      dsAuthToken = results?.[0]?.result || null;
+      const result = results?.[0]?.result || {};
+      if (result.token) dsAuthToken = result.token;
+      if (result.settingsToken) dsSettingsToken = result.settingsToken;
       if (dsAuthToken) break;
     } catch {}
     if (attempt < 4) await new Promise(r => setTimeout(r, 1500));
@@ -1232,6 +1298,60 @@ async function dsEnsureToken() {
   }
 
   return dsAuthToken;
+}
+
+// 从 DeepSeek 标签页提取 settingsToken
+async function dsEnsureSettingsToken() {
+  if (dsSettingsToken !== null) return dsSettingsToken;
+
+  const tabs = await chrome.tabs.query({ url: '*://chat.deepseek.com/*' });
+  if (tabs.length === 0) return null;
+
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabs[0].id },
+      world: 'MAIN',
+      func: () => {
+        function extract(raw) {
+          if (!raw || typeof raw !== 'string' || raw.length <= 10) return null;
+          try {
+            const parsed = JSON.parse(raw);
+            if (typeof parsed === 'string' && parsed.length > 10) return parsed;
+            if (typeof parsed === 'object' && parsed !== null) {
+              let t = parsed.token || parsed.access_token || parsed.jwt;
+              if (t && typeof t === 'string' && t.length > 10) return t;
+              if (parsed.value) {
+                if (typeof parsed.value === 'string' && parsed.value.length > 10) return parsed.value;
+                if (typeof parsed.value === 'object') {
+                  t = parsed.value.token || parsed.value.settingsToken || parsed.value.access_token;
+                  if (t && typeof t === 'string' && t.length > 10) return t;
+                }
+              }
+            }
+          } catch {}
+          return null;
+        }
+        try {
+          const st = localStorage.getItem('settingsToken');
+          const t = extract(st);
+          if (t) return t;
+        } catch {}
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.toLowerCase().includes('setting')) {
+              const v = localStorage.getItem(k);
+              const t = extract(v);
+              if (t) return t;
+            }
+          }
+        } catch {}
+        return null;
+      },
+    });
+    dsSettingsToken = results?.[0]?.result || null;
+  } catch { dsSettingsToken = null; }
+  return dsSettingsToken;
 }
 
 // SHA-256 PoW 求解器（纯 JS，可在 Service Worker 中运行）
@@ -1333,22 +1453,28 @@ async function dsDirectSend(prompt, chatId, requestId, parentMessageId, mode) {
   try {
     // 1. 获取 token（清除缓存确保每次都是新 token）
     dsAuthToken = null;
+    dsSettingsToken = null;
     const token = await dsEnsureToken();
     if (!token) {
       forward({ type: 'ds-error', error: '未获取到 DeepSeek 认证 Token，请先登录 chat.deepseek.com' });
       return;
     }
+    const settingsToken = await dsEnsureSettingsToken();
+    const tzOffset = -new Date().getTimezoneOffset() * 60;
 
     const headers = {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream, */*',
       Referer: 'https://chat.deepseek.com/',
       Origin: 'https://chat.deepseek.com',
+      'x-client-bundle-id': 'com.deepseek.chat',
+      'x-client-locale': 'zh_CN',
       'x-client-platform': 'web',
-      'x-client-version': '1.7.0',
-      'x-app-version': '20241129.1',
+      'x-client-timezone-offset': String(tzOffset),
+      'x-client-version': '2.2.0',
       Authorization: `Bearer ${token}`,
     };
+    if (settingsToken) headers['x-settings-token'] = settingsToken;
 
     // 2. 创建/复用会话
     let sessionId = chatId;
@@ -1515,6 +1641,278 @@ async function dsDirectSend(prompt, chatId, requestId, parentMessageId, mode) {
     }
   } finally {
     dsAbortController = null;
+  }
+}
+
+// ── 扫描插件生成的会话（在 DeepSeek 页面的 MAIN world 执行）──
+
+async function scanSessionsInMain(limit) {
+  const MARKER = '你是一个视频内容总结助手';
+  const pluginIds = [];
+  const t0 = performance.now();
+
+  // 重置中止标志
+  window.__dsAbortScan = false;
+
+  // 轮询等待侧边栏渲染（最多 15 秒）
+  let sidebarReady = false;
+  for (let attempt = 0; attempt < 30 && !window.__dsAbortScan; attempt++) {
+    const links = document.querySelectorAll('a[href^="/a/chat/s/"]');
+    if (links.length > 0) { sidebarReady = true; break; }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (window.__dsAbortScan) return { ok: true, sessionIds: pluginIds, total: 0, aborted: true };
+  if (!sidebarReady) return { ok: false, error: 'DeepSeek 页面侧边栏未加载，请确保已登录 chat.deepseek.com' };
+  console.log('[BiliSummary] ⏱ 侧边栏就绪:', (performance.now() - t0).toFixed(0), 'ms');
+
+  // 直接采集所有会话链接（折叠分组中的链接也在 DOM 中）
+  const tCollect = performance.now();
+  const links = document.querySelectorAll('a[href^="/a/chat/s/"]');
+  const re = /\/a\/chat\/s\/([a-f0-9-]+)/;
+  const allSessions = [];
+
+  for (const a of links) {
+    const href = a.getAttribute('href') || '';
+    const sessionId = (href.match(re) || [])[1];
+    if (!sessionId || allSessions.some(s => s.id === sessionId)) continue;
+    const name = a.textContent.trim() || '';
+    allSessions.push({ id: sessionId, name });
+  }
+  console.log('[BiliSummary] ⏱ 采集链接耗时:', (performance.now() - tCollect).toFixed(0), 'ms, 共', allSessions.length, '个会话');
+
+  console.log('[BiliSummary] DOM 扫描到', allSessions.length, '个会话，开始逐个检查内容...');
+
+  let checked = 0;
+  for (const session of allSessions) {
+    if (window.__dsAbortScan) {
+      console.log('[BiliSummary] 扫描已中止，已检查', checked, '个，匹配', pluginIds.length, '个');
+      return { ok: true, sessionIds: pluginIds, total: allSessions.length, aborted: true };
+    }
+    if (checked >= limit) break;
+    checked++;
+
+    const tLink = performance.now();
+    // 每次点击前重新查询侧边栏链接，避免虚拟列表回收 DOM 导致引用失效
+    const link = document.querySelector(`a[href="/a/chat/s/${session.id}"]`);
+    if (!link) {
+      console.log('[BiliSummary] #' + checked + ' 跳过 (侧边栏中未找到链接):', session.name.slice(0, 30));
+      continue;
+    }
+
+    link.scrollIntoView({ block: 'center' });
+    await new Promise(r => setTimeout(r, 150));
+    console.log('[BiliSummary] ⏱ #' + checked + ' query+scroll:', (performance.now() - tLink).toFixed(0), 'ms');
+
+    const tClick = performance.now();
+    const prevHref = window.location.href;
+    link.click();
+
+    // 等待 URL 变化，确认已导航到目标会话（最多 3 秒）
+    let urlChanged = false;
+    for (let attempt = 0; attempt < 15; attempt++) {
+      await new Promise(r => setTimeout(r, 200));
+      if (window.location.href !== prevHref && window.location.href.includes(session.id)) {
+        urlChanged = true;
+        break;
+      }
+    }
+
+    if (!urlChanged) {
+      console.log('[BiliSummary] ⏱ #' + checked + ' URL未变化:', (performance.now() - tClick).toFixed(0), 'ms');
+      console.log('[BiliSummary] #' + checked + ' 跳过 (URL未变化):', session.name.slice(0, 30));
+      continue;
+    }
+    console.log('[BiliSummary] ⏱ #' + checked + ' URL变化等待:', (performance.now() - tClick).toFixed(0), 'ms');
+
+    // 等待消息内容渲染，仅检查当前会话的消息体
+    const tRender = performance.now();
+    let matched = false;
+    for (let attempt = 0; attempt < 15; attempt++) {
+      await new Promise(r => setTimeout(r, 200));
+      const list = document.querySelector('.ds-virtual-list-visible-items');
+      if (!list) continue;
+      const text = list.textContent || '';
+      if (text.includes(MARKER)) { matched = true; break; }
+      // 内容已渲染但不含 MARKER，直接放弃
+      if (text.length > 50) break;
+    }
+
+    if (matched) {
+      pluginIds.push(session.id);
+      console.log('[BiliSummary] ⏱ #' + checked + ' 内容匹配耗时:', (performance.now() - tRender).toFixed(0), 'ms —', session.name.slice(0, 30));
+    } else {
+      console.log('[BiliSummary] ⏱ #' + checked + ' 未匹配耗时:', (performance.now() - tRender).toFixed(0), 'ms —', session.name.slice(0, 30));
+    }
+
+    // 发送进度到 ISOLATED world bridge → background → panel
+    window.postMessage({
+      type: 'ds-scan-progress',
+      current: session.name,
+      checked,
+      total: allSessions.length,
+      matched: pluginIds.length
+    }, window.location.origin);
+
+    // 每 20 个打印一次进度
+    if (checked % 20 === 0) {
+      console.log('[BiliSummary] 已检查', checked, '/', allSessions.length, '，已匹配', pluginIds.length);
+    }
+  }
+
+  console.log('[BiliSummary] ⏱ 扫描完成:', (performance.now() - t0).toFixed(0), 'ms — 总对话', allSessions.length, '，已检查', checked, '，匹配', pluginIds.length);
+  return { ok: true, sessionIds: pluginIds, total: allSessions.length };
+}
+
+async function deleteSessionsInMain(sessionIds) {
+  const BASE = 'https://chat.deepseek.com/api/v0';
+
+  // 提取 token 和 settingsToken
+  let settingsToken = null;
+  const token = (() => {
+    function tryGetToken(raw) {
+      if (!raw || typeof raw !== 'string' || raw.length <= 10) return null;
+      try {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed === 'string' && parsed.length > 10) return parsed;
+        if (typeof parsed === 'object' && parsed !== null) {
+          let t = parsed.token || parsed.access_token || parsed.jwt;
+          if (t && typeof t === 'string' && t.length > 10) return t;
+          if (parsed.value) {
+            if (typeof parsed.value === 'string' && parsed.value.length > 10) return parsed.value;
+            if (typeof parsed.value === 'object') {
+              t = parsed.value.token || parsed.value.settingsToken || parsed.value.access_token;
+              if (t && typeof t === 'string' && t.length > 10) return t;
+            }
+          }
+        }
+      } catch { return raw; }
+      return null;
+    }
+    const keys = ['userToken', 'token', 'ds_token', 'auth_token', 'access_token', 'jwt'];
+    for (const key of keys) {
+      const t = tryGetToken(localStorage.getItem(key));
+      if (t) return t;
+    }
+    try {
+      const st = localStorage.getItem('settingsToken');
+      if (st) settingsToken = tryGetToken(st);
+    } catch {}
+    return null;
+  })();
+  if (!token) return { ok: false, error: '无法获取 DeepSeek 登录凭证，请先登录 chat.deepseek.com' };
+
+  if (!settingsToken) {
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.toLowerCase().includes('setting')) {
+          const v = localStorage.getItem(k);
+          const t = tryGetToken(v);
+          if (t) {
+            settingsToken = t;
+            break;
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 动态读取页面版本号，轮询等待 SPA 初始化（最多 10 秒）
+  let clientVersion = null;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      if (window.__CLIENT_VERSION__) clientVersion = window.__CLIENT_VERSION__;
+    } catch {}
+    if (clientVersion) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (!clientVersion) { clientVersion = '2.2.0'; console.warn('[BiliSummary] 未能动态读取 clientVersion，使用硬编码默认值:', clientVersion); }
+
+  const tzOffset = -new Date().getTimezoneOffset() * 60;
+
+  console.log('[BiliSummary] deleteSessionsInMain clientVersion:', clientVersion, 'sessionCount:', sessionIds.length,
+    'settingsToken:', settingsToken ? (settingsToken.slice(0, 20) + '...') : 'null');
+
+  const headers = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+    Referer: 'https://chat.deepseek.com/',
+    Origin: 'https://chat.deepseek.com',
+    'x-client-bundle-id': 'com.deepseek.chat',
+    'x-client-locale': 'zh_CN',
+    'x-client-platform': 'web',
+    'x-client-timezone-offset': String(tzOffset),
+    'x-client-version': clientVersion,
+  };
+  if (settingsToken) headers['x-settings-token'] = settingsToken;
+  let deleted = 0;
+  let failed = 0;
+
+  for (const sid of sessionIds) {
+    try {
+      const resp = await fetch(`${BASE}/chat_session/delete`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({ chat_session_id: sid })
+      });
+      if (resp.ok) { deleted++; } else { failed++; }
+    } catch (_) { failed++; }
+  }
+
+  return { ok: true, deleted, failed };
+}
+
+// ── 安全执行脚本（自动重试 tab 失效）──
+
+async function dsExecuteScriptWithRetry(func, args, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    const tab = await dsEnsureTab();
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        func,
+        args
+      });
+      return results[0]?.result;
+    } catch (e) {
+      if (i < retries && (e.message?.includes('removed') || e.message?.includes('closed'))) {
+        console.warn('[BiliSummary] executeScript 失败 (tab 失效)，重试:', i + 1);
+        // 清除旧的 tab 引用，下次循环重新获取
+        for (const tid of dsInjectedTabs) {
+          try { await chrome.tabs.get(tid); } catch { dsInjectedTabs.delete(tid); }
+        }
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
+// ── background.js 消息处理辅助 ──
+
+async function dsScanPluginSessions(limit = 200) {
+  try {
+    await dsEnsureStorageLoaded();
+    const result = await dsExecuteScriptWithRetry(scanSessionsInMain, [limit]);
+    return result || { ok: false, error: '扫描未返回结果' };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+async function dsDeleteSessions(sessionIds) {
+  if (!sessionIds || sessionIds.length === 0) {
+    return { ok: false, error: '没有需要删除的会话' };
+  }
+  try {
+    await dsEnsureStorageLoaded();
+
+    const result = await dsExecuteScriptWithRetry(deleteSessionsInMain, [sessionIds]);
+    return result || { ok: false, error: '删除未返回结果' };
+  } catch (e) {
+    return { ok: false, error: String(e) };
   }
 }
 

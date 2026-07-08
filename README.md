@@ -110,6 +110,19 @@ BiliSummary/
 - Chrome 88+ (Manifest V3)
 - Edge 88+ (Manifest V3)
 
+## 常见问题
+
+### API 请求返回 HTML 而非 JSON（如 `<!doctype` 错误）
+
+这通常是因为请求头中的 `x-client-version` 版本号与 DeepSeek 当前线上版本不匹配，导致请求被重定向或拒绝。
+
+插件会优先从 DeepSeek 页面动态读取版本号（通过 `window.__CLIENT_VERSION__`），读取失败时回退到硬编码默认值。如果控制台出现 `[BiliSummary] 未能动态读取 clientVersion` 警告，说明当前默认值可能已过时。
+
+**解决方法：**
+1. 打开 `chat.deepseek.com`，按 F12 打开开发者工具
+2. 在 Network 标签页中筛选 `api/v0`，查看任意请求的 `x-client-version` 请求头获取当前版本号
+3. 在插件设置中检查 API 配置是否正确
+
 ## 许可证
 
 [MIT](LICENSE)
