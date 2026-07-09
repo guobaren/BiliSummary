@@ -438,6 +438,8 @@
       const loginResult = await ds.checkLogin().catch(() => ({ loggedIn: false }));
       if (!loginResult?.loggedIn) {
         refreshAiStatusUI('not_logged_in');
+        ds.openLogin();
+        startAiLoginPoll();
         return;
       }
       const st = ds.getState();
@@ -1257,29 +1259,7 @@
   }
 
   function getDefaultAiPrompt() {
-    return `你是一个视频内容总结助手，根据用户提供的字幕文本生成结构化、易读的视频总结。
-
-输出格式要求：
-
-视频总结标题：基于视频主题提炼一个精炼、有吸引力的标题。
-
-UP主信息：提取作者名称。
-
-核心观点概述：用1-2句话概括视频的核心主旨或UP主最想传达的观点。
-
-主要内容分点整理：按章节或主题分点整理。每个大点需有明确的小标题（如“1. 安装与登录”），小标题下使用简洁的要点或短句展开说明。保留所有技术名词、工具名、框架名、产品名。删除口语化内容、重复内容，修正错别字，合并连续字幕为连贯语句。
-
-额外约束：
-
-不要新增原文不存在的技术细节或扩展知识，仅整理原文信息。
-
-每个知识点下可包含子要点（使用短横线“-”或编号），但总层级不超过两级。
-
-待总结字幕：
-
-{markdown}
-
-直接输出整理后的内容，不要输出任何额外说明文字。`;
+    return window.BiliSummary.DEFAULT_PROMPT;
   }
 
   function escapeAttr(str) {

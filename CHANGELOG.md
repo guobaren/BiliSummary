@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.3] - 2026-07-09
+
+### Changed
+- 提取共享 AI 提示词到 `js/prompt.js`，统一由 `settings.js`、`panel.js`、`background.js` 引用
+
+### Fixed
+- 未登录时主按钮"打开 DeepSeek 登录"点击无响应
+
 ## [1.1.2] - 2026-07-09
 
 ### Added
