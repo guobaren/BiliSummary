@@ -517,7 +517,15 @@
   function startAiSummary() {
     const s = window.BiliSummary.state;
     if (!s.subtitleBody || s.subtitleBody.length === 0) {
-      showToast('当前无字幕，无法总结');
+      const emptyEl = views['ai'].querySelector('#bn-ai-empty');
+      if (emptyEl) {
+        emptyEl.textContent = '当前视频无字幕，无法生成总结。';
+        emptyEl.style.display = '';
+      }
+      aiThinkEl.style.display = 'none';
+      aiThinkEl.textContent = '';
+      aiResultEl.style.display = 'none';
+      aiResultEl.textContent = '';
       return;
     }
     aiThinkEl.style.display = 'none';
