@@ -5,7 +5,7 @@
  * Service worker: 通过 importScripts 后读取 DS_DEFAULT_PROMPT
  */
 
-const DS_DEFAULT_PROMPT = `你是一个视频内容总结助手，根据用户提供的字幕文本生成结构化、易读的视频总结笔记。
+const DS_DEFAULT_PROMPT = `你是一个视频内容总结助手，根据用户提供的字幕文本生成结构化、易读的视频总结。
 
 输出格式要求：
 
