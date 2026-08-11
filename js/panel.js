@@ -1476,25 +1476,39 @@
         startY: e.clientY,
         startW: rect.width,
         startH: rect.height,
+        startRight: rect.right,
       };
       document.addEventListener("mousemove", onResizeMove);
       document.addEventListener("mouseup", onResizeEnd);
     });
   }
 
+  function calculateLeftResizeGeometry(data, clientX, viewportWidth) {
+    const minWidth = 320;
+    const viewportMargin = 20;
+    const dx = clientX - data.startX;
+    const maxWidth = Math.max(
+      minWidth,
+      Math.min(viewportWidth * 0.9, data.startRight - viewportMargin),
+    );
+    const width = Math.max(minWidth, Math.min(data.startW - dx, maxWidth));
+    return { width, left: data.startRight - width };
+  }
+
   function onResizeMove(e) {
     if (!resizeData) return;
     const panel = panelEl;
     if (!panel) return;
-    const dx = e.clientX - resizeData.startX;
     const dy = e.clientY - resizeData.startY;
     // 左下角手柄：向右拖（dx>0）宽度减小，向左拖（dx<0）宽度增大
-    let newW = Math.max(320, Math.min(resizeData.startW - dx, window.innerWidth - 40));
+    const horizontal = calculateLeftResizeGeometry(resizeData, e.clientX, window.innerWidth);
+    let newW = horizontal.width;
     let newH = Math.max(400, Math.min(resizeData.startH + dy, window.innerHeight - 40));
     panel.style.width = newW + "px";
     panel.style.height = newH + "px";
-    // 固定右下角位置
-    panel.style.right = "20px";
+    // 左下角缩放时固定拖动开始时的右边界，避免右侧随宽度向右漂移
+    panel.style.left = horizontal.left + "px";
+    panel.style.right = "auto";
     panel.style.top = Math.min(parseInt(panel.style.top) || 100, window.innerHeight - newH - 20) + "px";
   }
 
@@ -1529,4 +1543,7 @@
     getScrollWrap: () => panelEl?.querySelector('.bn-scroll'),
     loadSettingsToUI,
   };
+  if (window.BiliSummary.__testHooks) {
+    window.BiliSummary.__testHooks.calculateLeftResizeGeometry = calculateLeftResizeGeometry;
+  }
 })();
