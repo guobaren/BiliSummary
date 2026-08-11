@@ -542,7 +542,7 @@
       window.BiliSummary.deepseek.clear();
       const videoContext = buildAiVideoContext();
       const prompt = s.settings.deepseekPrompt || '';
-      const mode = s.settings.aiMode || 'expert';
+      const mode = s.settings.aiMode || 'fast';
       window.BiliSummary.deepseek.sendMarkdown(videoContext, prompt, mode);
     } else {
       aiMessages = [
@@ -799,8 +799,8 @@
         <div class="bn-mode-row" id="bn-mode-row">
           <span class="bn-mode-label">AI 模式</span>
           <div class="bn-mode-toggle">
-            <input type="radio" name="bn-ai-mode" id="bn-mode-fast" value="fast"><label for="bn-mode-fast">快速</label>
-            <input type="radio" name="bn-ai-mode" id="bn-mode-expert" value="expert" checked><label for="bn-mode-expert">专家</label>
+            <input type="radio" name="bn-ai-mode" id="bn-mode-fast" value="fast" checked><label for="bn-mode-fast">快速</label>
+            <input type="radio" name="bn-ai-mode" id="bn-mode-expert" value="expert"><label for="bn-mode-expert">专家</label>
           </div>
         </div>
         <label class="bn-radio-line">
@@ -1189,7 +1189,7 @@
       });
     });
     // 恢复已保存的模式
-    const savedMode = window.BiliSummary.state.settings.aiMode || 'expert';
+    const savedMode = window.BiliSummary.state.settings.aiMode || 'fast';
     const modeRadio = panelEl.querySelector(`input[name="bn-ai-mode"][value="${savedMode}"]`);
     if (modeRadio) modeRadio.checked = true;
 
@@ -1324,7 +1324,7 @@
     }
 
     // AI 模式
-    const savedMode = s.aiMode || 'expert';
+    const savedMode = s.aiMode || 'fast';
     const modeRadio = panelEl.querySelector(`input[name="bn-ai-mode"][value="${savedMode}"]`);
     if (modeRadio) modeRadio.checked = true;
   }

@@ -213,8 +213,8 @@ window.__deepseekApiVersion = 'v20260709-5';
       };
       if (settingsToken) headers["x-settings-token"] = settingsToken;
 
-      // 2. 创建会话（始终创建新会话）
-      let sessionId = null;
+      // 2. 追问复用现有会话；首次总结或会话失效时再创建新会话
+      let sessionId = chatId || null;
       let sessionInvalid = false;
       for (let retry = 0; retry <= 1; retry++) {
         sessionInvalid = false;

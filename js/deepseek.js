@@ -56,6 +56,8 @@
   function sendMarkdown(markdown, prompt, mode) {
     if (state === 'reading' || state === 'responding') return;
 
+    const effectiveMode = mode || 'fast';
+
     // 不清空历史，仅保存本轮思考/回复占位
     thinkText = '';
     responseText = '';
@@ -69,11 +71,11 @@
       type: 'ds-send',
       markdown,
       prompt,
-      mode: mode || 'expert',
+      mode: effectiveMode,
       chatId,
       requestId,
     });
-    console.log('[BiliSummary] ds-send sent', { requestId, chatId, mode, promptLen: prompt?.length, markdownLen: markdown?.length });
+    console.log('[BiliSummary] ds-send sent', { requestId, chatId, mode: effectiveMode, promptLen: prompt?.length, markdownLen: markdown?.length });
 
     setTimeout(() => {
       if (state === 'reading' || state === 'responding') {

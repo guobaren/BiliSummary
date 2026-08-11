@@ -40,7 +40,7 @@ window.BiliSummary.state = {
     subtitleLang: '',
     deepseekPrompt: '',
     aiChannel: 'browser',   // 'browser' | 'api'
-    aiMode: 'expert',       // 'fast' | 'expert'
+    aiMode: 'fast',         // 'fast' | 'expert'
     floatIconEnabled: true, // 浮动图标常驻
     autoSummary: true,      // 打开面板后自动开始总结
     apiCfg: {

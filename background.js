@@ -1020,7 +1020,7 @@ async function dsHandleSend(markdown, prompt, requestId, senderChatId, mode) {
 
   chrome.tabs.sendMessage(tab.id, {
     type: 'ds-inject-request',
-    payload: { prompt: fullPrompt, chatId: dsChatId, requestId, parentMessageId, thinking_enabled: mode !== 'fast' }
+    payload: { prompt: fullPrompt, chatId: dsChatId, requestId, parentMessageId, thinking_enabled: mode === 'expert' }
   }).catch((e) => {
     if (String(e).includes('Receiving end does not exist')) {
       dsInjectedTabs.delete(tab.id);
@@ -1413,7 +1413,7 @@ async function dsSolvePowDeepSeekHashV1(powChallenge) {
 // DeepSeek API 直连（无需持久标签页）
 async function dsDirectSend(prompt, chatId, requestId, parentMessageId, mode) {
   const forward = (msg) => dsSendToBilibiliTab({ ...msg, requestId });
-  const thinkingEnabled = mode !== 'fast';
+  const thinkingEnabled = mode === 'expert';
   console.log('[BiliSummary] dsDirectSend begin', { chatId, parentMessageId, mode, promptLen: prompt?.length });
 
   try {
