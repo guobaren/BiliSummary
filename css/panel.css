@@ -1164,6 +1164,37 @@
   margin-left: 6px;
 }
 
+.bn-field-hint {
+  margin: 2px 0 8px;
+  font-size: 0.8em;
+  line-height: 1.45;
+  color: var(--bn-text-sub);
+  word-break: break-word;
+}
+
+.bn-api-links {
+  display: flex;
+  justify-content: flex-end;
+  margin: 4px 0 0;
+}
+.bn-api-links .bn-btn-link { font-size: 0.8em; }
+
+.bn-api-usage {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--bn-border);
+  font-size: 0.8em;
+  line-height: 1.45;
+  color: var(--bn-text-sub);
+  word-break: break-word;
+}
+
+.bn-input:read-only {
+  opacity: 0.75;
+  cursor: default;
+  background: var(--bn-btn-bg);
+}
+
 .bn-checkbox-row {
   display: flex !important;
   min-width: auto !important;

@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "BiliSummary",
-  "version": "1.1.6",
-  "description": "B站视频字幕抓取 + AI 总结（支持 DeepSeek 浏览器 SDK 与通用 AI API 双通道）",
+  "version": "1.2.0",
+  "description": "B站视频字幕抓取 + AI 总结（默认 OpenCode Go / DeepSeek V4.1 Flash，且支持 DeepSeek 浏览器 SDK 与通用 OpenAI 兼容接口）",
   "permissions": ["storage", "activeTab", "scripting", "tabs", "cookies", "contextMenus"],
   "host_permissions": [
     "https://api.bilibili.com/*",
     "https://*.bilibili.com/*",
+    "https://opencode.ai/*",
     "*://chat.deepseek.com/*",
     "https://api.deepseek.com/*",
     "https://api.openai.com/*",
@@ -24,7 +25,7 @@
         "*://*.bilibili.com/video/*",
         "*://*.bilibili.com/list/*"
       ],
-      "js": ["libs/wasm-solver.js", "js/state.js", "js/prompt.js", "js/settings.js", "js/subtitle.js", "js/chapter.js", "js/deepseek.js", "js/api-ai.js", "js/panel.js", "js/export.js", "content.js"],
+      "js": ["libs/wasm-solver.js", "js/providers.js", "js/state.js", "js/prompt.js", "js/settings.js", "js/subtitle.js", "js/chapter.js", "js/deepseek.js", "js/api-ai.js", "js/panel.js", "js/export.js", "content.js"],
       "css": ["css/panel.css"],
       "run_at": "document_idle"
     }
