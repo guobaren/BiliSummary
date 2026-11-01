@@ -1,13 +1,17 @@
 // js/api-ai.js - 通用 OpenAI 兼容 API 通道
 // 调用路径：content script -> chrome.runtime.sendMessage -> background(fetch) -> content -> panel
+// 默认服务商为 OpenCode Go（仅提供 DeepSeek V4.1 Flash）
 (function () {
   'use strict';
 
   const BN = window.BiliSummary;
   if (!BN) return;
 
+  const PROVIDERS = BN.AI_PROVIDERS || null;
+
   // 内置模型清单（只是给 UI 提供默认值，用户可手动输入任意模型 ID）
   const BUILTIN_MODELS = {
+    'deepseek-v4.1-flash':    { provider: 'OpenCode Go', name: 'DeepSeek V4.1 Flash' },
     'deepseek-chat':          { provider: 'DeepSeek', name: 'DeepSeek-V3 (chat)' },
     'deepseek-reasoner':      { provider: 'DeepSeek', name: 'DeepSeek-R1 (reasoner)' },
     'gpt-4o':                 { provider: 'OpenAI',   name: 'GPT-4o' },
@@ -22,10 +26,11 @@
 
   // 拿到用户所有后续消息对应的纯文本（由 panel 在调用前拼好）
   // 这里只负责把一组 messages 流式发给 API，并透过事件通知 chat UI
-  const listeners = { chunk: [], state: [], done: [], error: [] };
+  const listeners = { chunk: [], state: [], done: [], error: [], usage: [] };
   let state = 'idle';          // idle | sending | responding | done | error
   let activeRequestId = null;
-  let activeChatId = null;     // 一段对话的唯一 id（复用 chat_session 语义；API 通道每轮重新赋值）
+  let activeChatId = null;     // 一段对话的唯一 id（当前用作 OpenCode 会话标识）
+  let lastSessionId = '';
 
   function emit(event, data) {
     for (const fn of listeners[event]) {
@@ -39,6 +44,21 @@
     emit('state', s);
   }
 
+  /**
+   * 新建一段对话的会话 ID（OpenCode Go 通过 x-opencode-session 做路由与缓存）
+   */
+  function newSession() {
+    lastSessionId = PROVIDERS
+      ? PROVIDERS.createSessionId()
+      : `bilisummary-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    activeChatId = lastSessionId;
+    return lastSessionId;
+  }
+
+  function getSessionId() {
+    return lastSessionId || newSession();
+  }
+
   // 通过 background fetch 走，绕过 content_scripts 的 CORS 限制
   function callBackground(requestId) {
     return new Promise((resolve, reject) => {
@@ -46,6 +66,8 @@
         if (!msg || msg.requestId !== requestId) return;
         if (msg.type === 'api-chunk') {
           emit('chunk', { type: msg.role === 'think' ? 'think' : 'response', text: msg.text });
+        } else if (msg.type === 'api-usage') {
+          emit('usage', msg.usage);
         } else if (msg.type === 'api-done') {
           cleanup(); resolve();
         } else if (msg.type === 'api-error') {
@@ -65,7 +87,9 @@
    */
   async function sendToApi(messages, opts = {}) {
     if (state === 'sending' || state === 'responding') return;
-    const requestId = crypto.randomUUID();
+    const requestId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+      ? crypto.randomUUID()
+      : `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     activeRequestId = requestId;
     setState('sending');
 
@@ -73,10 +97,12 @@
       type: 'api-send',
       messages,
       requestId,
+      provider: opts.provider || (PROVIDERS ? PROVIDERS.DEFAULT_ID : 'opencode-go'),
       stream: opts.stream !== false,
       endpoint: opts.endpoint || '',
       apiKey: opts.apiKey || '',
       model: opts.model || '',
+      sessionId: opts.sessionId || getSessionId(),
     });
 
     try {
@@ -100,21 +126,31 @@
 
   function clear() {
     activeRequestId = null;
+    activeChatId = null;
+    lastSessionId = '';
     setState('idle');
   }
 
   /**
    * 从指定 endpoint/apiKey 获取可用模型列表（走 background fetch）
    */
-  function fetchModels(endpoint, apiKey) {
+  function fetchModels(endpoint, apiKey, providerId) {
     return new Promise((resolve, reject) => {
-      chrome.storage.local.get('bilisummary_api_cfg', (stored) => {
-        const cfg = stored.bilisummary_api_cfg || {};
+      chrome.storage.local.get('bilisummary_settings', (stored) => {
+        const settings = (stored && stored.bilisummary_settings) || {};
+        const cfg = settings.apiCfg || {};
+        const provider = providerId || settings.apiProvider || cfg.provider || (PROVIDERS ? PROVIDERS.DEFAULT_ID : '');
+        const defaultEndpoint = PROVIDERS ? PROVIDERS.resolve(provider, cfg.endpoint).endpoint : 'https://api.deepseek.com/v1/chat/completions';
         const merged = {
-          endpoint: endpoint || cfg.endpoint || 'https://api.deepseek.com/v1/chat/completions',
+          endpoint: endpoint || cfg.endpoint || defaultEndpoint,
           apiKey: apiKey || cfg.apiKey || '',
         };
-        chrome.runtime.sendMessage({ type: 'api-fetch-models', endpoint: merged.endpoint, apiKey: merged.apiKey }, (resp) => {
+        chrome.runtime.sendMessage({
+          type: 'api-fetch-models',
+          endpoint: merged.endpoint,
+          apiKey: merged.apiKey,
+          provider,
+        }, (resp) => {
           if (chrome.runtime.lastError) {
             reject(new Error(chrome.runtime.lastError.message));
             return;
@@ -131,11 +167,16 @@
     abort,
     clear,
     fetchModels,
+    newSession,
+    getSessionId,
     getState: () => state,
+    getChatId: () => activeChatId,
     onChunk: (fn) => listeners.chunk.push(fn),
     onStateChange: (fn) => listeners.state.push(fn),
     onDone: (fn) => listeners.done.push(fn),
     onError: (fn) => listeners.error.push(fn),
+    onUsage: (fn) => listeners.usage.push(fn),
     BUILTIN_MODELS,
+    PROVIDERS,
   };
 })();

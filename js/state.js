@@ -4,6 +4,18 @@
  */
 window.BiliSummary = window.BiliSummary || {};
 
+// 默认 AI 接口配置：OpenCode Go 套餐（仅提供 DeepSeek V4.1 Flash）
+const BN_API_PROVIDERS = window.BiliSummary.AI_PROVIDERS;
+const BN_DEFAULT_API_CFG = BN_API_PROVIDERS
+  ? BN_API_PROVIDERS.defaultApiConfig()
+  : {
+      provider: 'opencode-go',
+      endpoint: 'https://opencode.ai/inference/go/openai/v1/chat/completions',
+      apiKey: '',
+      model: 'deepseek-v4.1-flash',
+      stream: true,
+    };
+
 window.BiliSummary.state = {
   // 视频信息
   bvid: '',
@@ -39,16 +51,13 @@ window.BiliSummary.state = {
     darkMode: false,
     subtitleLang: '',
     deepseekPrompt: '',
-    aiChannel: 'browser',   // 'browser' | 'api'
+    aiChannel: 'api',       // 'browser' | 'api'（默认 OpenCode Go API 通道）
     aiMode: 'fast',         // 'fast' | 'expert'
     floatIconEnabled: true, // 浮动图标常驻
     autoSummary: true,      // 打开面板后自动开始总结
-    apiCfg: {
-      endpoint: 'https://api.deepseek.com/v1/chat/completions',
-      apiKey: '',
-      model: 'deepseek-v4-flash',
-      stream: true,
-    },
+    apiProvider: BN_DEFAULT_API_CFG.provider, // 'opencode-go' | 'custom'
+    apiKeys: {},            // 按服务商保存的 API Key，切换服务商时避免互相串用
+    apiCfg: { ...BN_DEFAULT_API_CFG },
   },
 };
 
