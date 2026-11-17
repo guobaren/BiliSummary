@@ -72,7 +72,10 @@
 
     const provider = resolveProvider(providers, savedSettings);
     const merged = {
-      ...providers.defaultApiConfig(),
+      endpoint: provider.endpoint,
+      model: provider.model,
+      apiKey: '',
+      stream: true,
       ...(saved || {}),
       provider: provider.id,
     };

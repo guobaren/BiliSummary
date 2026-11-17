@@ -352,6 +352,12 @@ async function testProviderSwitchAndAddressInvalidation() {
   context.__panel = panel;
   vm.runInContext(source, vm.createContext(context));
   BN.__testHooks.bindApiConfigEvents();
+  assert.equal(BN.AI_PROVIDERS.CUSTOM.model, '', '自定义接口无默认模型');
+  assert.equal(BN.AI_PROVIDERS.CUSTOM.models.length, 0);
+  assert.equal(node('#bn-api-model-select').innerHTML, '<option value="">-- 请先点击获取模型 --</option>');
+  BN.apiAI = { async fetchModels() { return [{ id: 'fetched-model', name: '接口模型' }]; } };
+  await node('#bn-api-fetch-models').listeners.click[0]();
+  assert.ok(node('#bn-api-model-select').innerHTML.includes('fetched-model'), '点击获取后显示接口返回模型');
   const provider = node('#bn-api-provider');
   function switchTo(id) { provider.value = id; provider.fire('change'); }
   switchTo('opencode-go');
@@ -361,6 +367,7 @@ async function testProviderSwitchAndAddressInvalidation() {
   assert.equal(node('#bn-api-key').value, 'dummy-custom-key');
   assert.equal(node('#bn-api-model-input').value, 'gpt-4o');
   assert.equal(node('#bn-api-stream').checked, false);
+  assert.ok(!node('#bn-api-model-select').innerHTML.includes('fetched-model'), '切回后列表为空，需要重新获取');
   node('#bn-api-endpoint').value = 'https://api.deepseek.com/v1/chat/completions';
   node('#bn-api-endpoint').fire('input');
   assert.equal(node('#bn-api-key').value, '');
@@ -388,7 +395,15 @@ async function testProviderSwitchAndAddressInvalidation() {
   assert.equal(state.sentMessages.at(-1).apiKey, '', '显式空密钥不能回退到保存的密钥');
 }
 
+async function testCustomWithoutSavedModel() {
+  const { chrome } = createChrome({ bilisummary_settings: { apiProvider: 'custom', apiCfg: { endpoint: 'https://example.com/v1/chat/completions' } } });
+  const settings = await loadSettings(createContext(chrome), chrome);
+  assert.equal(settings.apiCfg.model, '', '旧配置缺少模型时不能注入默认模型');
+  assert.equal(settings.apiConfigs.custom.model, '');
+}
+
 async function run() {
+  await testCustomWithoutSavedModel();
   await testProviderSwitchAndAddressInvalidation();
   await testDefaultConfig();
   await testLegacyConfigMigration();

@@ -40,11 +40,8 @@ const BS_AI_PROVIDERS = (function () {
     endpoint: 'https://api.deepseek.com/v1/chat/completions',
     modelsUrl: '',
     host: '',
-    model: 'deepseek-v4-flash',
-    models: [
-      { id: 'deepseek-chat', name: 'DeepSeek-V3 (chat)' },
-      { id: 'deepseek-reasoner', name: 'DeepSeek-R1 (reasoner)' },
-    ],
+    model: '',
+    models: [],
     lockEndpoint: false,
     lockModel: false,
     sessionHeader: '',

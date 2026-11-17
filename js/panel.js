@@ -916,7 +916,7 @@
             <label>模型</label>
             <div class="bn-model-row">
               <select id="bn-api-model-select" class="bn-select bn-model-select"></select>
-              <input type="text" id="bn-api-model-input" class="bn-input bn-model-input" placeholder="deepseek-v4.1-flash">
+              <input type="text" id="bn-api-model-input" class="bn-input bn-model-input" placeholder="请先点击获取模型">
             </div>
           </div>
           <div class="bn-field-row">
@@ -1311,7 +1311,7 @@
       if (!modelSelect) return;
       const models = modelOptions(provider);
       if (!models.length) {
-        modelSelect.innerHTML = '<option value="">-- 获取模型列表或手动输入 --</option>';
+        modelSelect.innerHTML = '<option value="">-- 请先点击获取模型 --</option>';
         modelSelect.value = '';
         return;
       }
