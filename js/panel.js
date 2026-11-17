@@ -34,6 +34,9 @@
   let aiIsFollowUp = false;
   let aiThinkBufStarted = false; // 追问思考是否已加分隔符
   let aiAutoStarted = false; // 自动总结是否已触发（防止重复）
+  let lastApiUsage = null; // 最近一次 API 请求的用量（含 OpenCode Go 额度）
+  let fetchedModels = null; // 最近一次接口返回的模型列表
+  let renderApiConfigUI = null; // 由 bindApiConfigEvents 注册的设置页渲染函数
 
   const TAB_DEFS = [
     { id: 'ai', label: 'AI 总结', footer: false },
@@ -264,19 +267,19 @@
     const ds = window.BiliSummary.deepseek;
     if (!ds) return;
     ds.onStateChange((s) => {
-      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'browser') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'api') !== 'browser') return;
       refreshAiStatusUI(s);
     });
     ds.onChunk((chunk) => {
-      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'browser') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'api') !== 'browser') return;
       appendAiStreamChunk(chunk);
     });
     ds.onDone(() => {
-      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'browser') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'api') !== 'browser') return;
       onAiStreamDone();
     });
     ds.onError((err) => {
-      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'browser') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'api') !== 'browser') return;
       onAiStreamError(err);
     });
   }
@@ -285,20 +288,24 @@
     const api = window.BiliSummary.apiAI;
     if (!api) return;
     api.onStateChange((s) => {
-      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'api') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'api') !== 'api') return;
       refreshAiStatusUI(s);
     });
     api.onChunk((chunk) => {
-      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'api') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'api') !== 'api') return;
       appendAiStreamChunk(chunk);
     });
     api.onDone(() => {
-      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'api') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'api') !== 'api') return;
       onAiStreamDone();
     });
     api.onError((err) => {
-      if ((window.BiliSummary.state.settings.aiChannel || 'browser') !== 'api') return;
+      if ((window.BiliSummary.state.settings.aiChannel || 'api') !== 'api') return;
       onAiStreamError(err);
+    });
+    api.onUsage((usage) => {
+      lastApiUsage = usage;
+      renderApiUsage();
     });
   }
 
@@ -428,7 +435,68 @@
   }
 
   function getActiveChannel() {
-    return window.BiliSummary.state.settings.aiChannel || 'browser';
+    return window.BiliSummary.state.settings.aiChannel || 'api';
+  }
+
+  /**
+   * 当前生效的 API 服务商（默认 OpenCode Go）
+   */
+  function getApiProvider() {
+    const settings = window.BiliSummary.state.settings;
+    const cfg = settings.apiCfg || {};
+    const providers = window.BiliSummary.AI_PROVIDERS;
+    if (providers) return providers.resolve(settings.apiProvider || cfg.provider, cfg.endpoint);
+    return {
+      id: 'custom',
+      label: '自定义接口',
+      description: '',
+      endpoint: cfg.endpoint || '',
+      model: cfg.model || '',
+      models: [],
+      lockEndpoint: false,
+      lockModel: false,
+      keyUrl: '',
+      keyLabel: '',
+      keyPlaceholder: 'sk-...',
+    };
+  }
+
+  function getApiModelLabel(provider, modelId) {
+    const id = String(modelId || '');
+    const found = (provider?.models || []).find(item => item.id === id);
+    return found ? found.name : (id || provider?.model || '');
+  }
+
+  function formatApiUsage(usage) {
+    const providers = window.BiliSummary.AI_PROVIDERS;
+    const parsed = providers ? providers.parseUsage(usage) : null;
+    if (!parsed) return '';
+    const parts = [];
+    if (parsed.inputTokens != null || parsed.outputTokens != null) {
+      parts.push(`tokens 输入 ${parsed.inputTokens ?? '-'} / 输出 ${parsed.outputTokens ?? '-'}`);
+    }
+    if (parsed.cacheRead != null && parsed.cacheRead > 0) parts.push(`缓存读取 ${parsed.cacheRead}`);
+    const formatUsd = (value) => `$${(value >= 0.01 ? value.toFixed(4) : value.toFixed(6))}`;
+    if (providers && providers.isGoBilling(parsed.billingSource)) parts.push('计费来源：OpenCode Go 额度');
+    if (parsed.allowance != null) {
+      parts.push(`本次计入套餐额度 ${formatUsd(parsed.allowance)}`);
+    } else if (parsed.cost != null) {
+      parts.push(`本次消耗 ${formatUsd(parsed.cost)}`);
+    }
+    return parts.join(' · ');
+  }
+
+  function renderApiUsage() {
+    const el = panelEl?.querySelector('#bn-api-usage');
+    if (!el) return;
+    const text = lastApiUsage ? formatApiUsage(lastApiUsage) : '';
+    if (!text) {
+      el.style.display = 'none';
+      el.textContent = '';
+      return;
+    }
+    el.style.display = '';
+    el.textContent = `上次请求：${text}`;
   }
 
   async function onAiActionClick() {
@@ -455,6 +523,13 @@
       const st = api.getState();
       if (st === 'sending' || st === 'responding') {
         api.abort();
+        return;
+      }
+      const cfg = window.BiliSummary.state.settings.apiCfg || {};
+      if (!cfg.apiKey || !cfg.endpoint || !cfg.model) {
+        refreshAiStatusUI();
+        switchTab('setting');
+        showToast('请先到「设置」页填写 API Key');
         return;
       }
       startAiSummary();
@@ -545,6 +620,10 @@
       const mode = s.settings.aiMode || 'fast';
       window.BiliSummary.deepseek.sendMarkdown(videoContext, prompt, mode);
     } else {
+      // 新对话：重置 OpenCode 会话标识与用量显示
+      window.BiliSummary.apiAI.newSession();
+      lastApiUsage = null;
+      renderApiUsage();
       aiMessages = [
         { role: 'system', content: buildAiSystemPrompt() },
         { role: 'user', content: buildAiVideoContext() },
@@ -572,7 +651,7 @@
     if (!s.settings.autoSummary) return;
     if (aiAutoStarted) return;
 
-    const channel = s.settings.aiChannel || 'browser';
+    const channel = s.settings.aiChannel || 'api';
 
     if (channel === 'browser') {
       const ds = window.BiliSummary.deepseek;
@@ -601,11 +680,14 @@
 
   function sendAiApiMessages() {
     const cfg = window.BiliSummary.state.settings.apiCfg || {};
+    const provider = getApiProvider();
     window.BiliSummary.apiAI.sendToApi(aiMessages, {
+      provider: provider.id,
       endpoint: cfg.endpoint,
       apiKey: cfg.apiKey,
       model: cfg.model,
       stream: cfg.stream,
+      sessionId: window.BiliSummary.apiAI.getSessionId(),
     });
   }
 
@@ -661,7 +743,7 @@
   function refreshAiStatusUI(forceState) {
     if (!aiStatusEl) return;
     // 始终从 settings 读取当前通道，保证和设置页同步
-    const channel = window.BiliSummary.state.settings.aiChannel || 'browser';
+    const channel = window.BiliSummary.state.settings.aiChannel || 'api';
 
     let st = forceState;
     if (!st) {
@@ -670,8 +752,12 @@
 
     // 顶部状态行 & 通道标签
     const cfg = window.BiliSummary.state.settings.apiCfg || {};
+    const provider = getApiProvider();
+    const providerModel = getApiModelLabel(provider, cfg.model) || cfg.model;
     if (aiChannelTagEl) {
-      aiChannelTagEl.textContent = channel === 'browser' ? 'DeepSeek 浏览器' : '自定义接口';
+      aiChannelTagEl.textContent = channel === 'browser'
+        ? 'DeepSeek 浏览器'
+        : (provider.id === 'opencode-go' ? `OpenCode Go · ${providerModel}` : `自定义接口 · ${providerModel || '未配置模型'}`);
     }
 
     // 未登录时 status line 显示主动提醒而非「就绪」
@@ -702,14 +788,17 @@
         aiDsLoginBtn.style.display = 'none';
       }
     } else {
-      // 自定义接口：检查是否配置了必要信息
+      aiDsLoginBtn.style.display = 'none';
+      // OpenCode Go / 自定义接口：检查是否配置了必要信息
       const hasCfg = !!(cfg.apiKey && cfg.endpoint && cfg.model);
       if (!hasCfg) {
-        loginNotice = '尚未配置 API Key / Endpoint / 模型，请先到「设置」页配置。';
+        loginNotice = provider.id === 'opencode-go'
+          ? '尚未填写 OpenCode API Key：请到「设置」页填入 OpenCode Console 中的 Key（OpenCode Go 仅提供 DeepSeek V4.1 Flash）。'
+          : '尚未配置 API Key / Endpoint / 模型，请先到「设置」页配置。';
         statusLineText = '未配置';
         statusLineCls = 'bn-ai-status-warn';
       } else if (st === 'idle' || !st) {
-        statusLineText = `就绪 · ${cfg.model}`;
+        statusLineText = `就绪 · ${providerModel || cfg.model}`;
         statusLineCls = 'bn-ai-status-ok';
       } else if (st === 'sending' || st === 'responding') {
         statusLineText = '总结中…';
@@ -805,30 +894,33 @@
         </div>
         <label class="bn-radio-line">
           <input type="radio" name="bn-ai-channel-setting" id="bn-as-api" value="api">
-          <div><div class="bn-radio-title">自定义接口（OpenAI 兼容）</div><div class="bn-radio-desc">使用下面配置的 Endpoint / API Key / 模型，绕过浏览器 SDK 直接调用</div></div>
+          <div><div class="bn-radio-title">OpenCode Go / 自定义接口（OpenAI 兼容）</div><div class="bn-radio-desc">默认使用 OpenCode Go 套餐（仅提供 DeepSeek V4.1 Flash），也可切换到任意 OpenAI 兼容接口</div></div>
         </label>
 
-        <div class="bn-setting-label" style="margin-top:16px">通用 AI API 配置（用于「自定义接口」通道）</div>
+        <div class="bn-setting-label" style="margin-top:16px">AI 接口配置（用于「OpenCode Go / 自定义接口」通道）</div>
         <div class="bn-api-config">
           <div class="bn-field-row">
+            <label>服务商</label>
+            <select id="bn-api-provider" class="bn-select"></select>
+          </div>
+          <div class="bn-field-hint" id="bn-api-provider-hint"></div>
+          <div class="bn-field-row">
             <label>Endpoint</label>
-            <input type="text" id="bn-api-endpoint" class="bn-input" placeholder="https://api.deepseek.com/v1/chat/completions">
+            <input type="text" id="bn-api-endpoint" class="bn-input" placeholder="https://opencode.ai/inference/go/openai/v1/chat/completions">
           </div>
           <div class="bn-field-row">
             <label>API Key</label>
-            <input type="password" id="bn-api-key" class="bn-input" placeholder="sk-...">
+            <input type="password" id="bn-api-key" class="bn-input" placeholder="OpenCode Console 中创建的 API Key">
           </div>
           <div class="bn-field-row">
             <label>模型</label>
             <div class="bn-model-row">
-              <select id="bn-api-model-select" class="bn-select bn-model-select">
-                <option value="">-- 点击选择模型 --</option>
-              </select>
-              <input type="text" id="bn-api-model-input" class="bn-input bn-model-input" placeholder="deepseek-v4-flash">
+              <select id="bn-api-model-select" class="bn-select bn-model-select"></select>
+              <input type="text" id="bn-api-model-input" class="bn-input bn-model-input" placeholder="deepseek-v4.1-flash">
             </div>
           </div>
           <div class="bn-field-row">
-            <button id="bn-api-fetch-models" class="bn-btn-secondary">获取模型列表</button>
+            <button id="bn-api-fetch-models" class="bn-btn-secondary">测试连接 / 获取模型</button>
             <span id="bn-api-status" class="bn-api-status"></span>
           </div>
           <div class="bn-field-row">
@@ -837,6 +929,10 @@
               <span>使用流式输出（SSE）</span>
             </label>
           </div>
+          <div class="bn-api-links">
+            <a class="bn-btn-link" id="bn-api-key-link" href="https://opencode.ai/console" target="_blank" rel="noopener noreferrer">获取 OpenCode API Key ↗</a>
+          </div>
+          <div class="bn-api-usage" id="bn-api-usage" style="display:none"></div>
         </div>
 
         <div class="bn-clear-history-section">
@@ -989,10 +1085,12 @@
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {
         window.BiliSummary.settings.resetDefaults();
+        fetchedModels = null;
         loadSettingsToUI();
         applyDisplaySettings();
         panelEl.setAttribute('data-bn-theme', '');
-        showToast('已恢复默认设置');
+        refreshAiStatusUI();
+        showToast('已恢复默认设置（OpenCode Go / DeepSeek V4.1 Flash）');
       });
     }
 
@@ -1157,6 +1255,8 @@
   }
 
   function bindApiConfigEvents() {
+    const providers = window.BiliSummary.AI_PROVIDERS;
+    const providerSelect = panelEl.querySelector('#bn-api-provider');
     const epEl = panelEl.querySelector('#bn-api-endpoint');
     const keyEl = panelEl.querySelector('#bn-api-key');
     const modelSelect = panelEl.querySelector('#bn-api-model-select');
@@ -1164,21 +1264,29 @@
     const fetchBtn = panelEl.querySelector('#bn-api-fetch-models');
     const apiStatus = panelEl.querySelector('#bn-api-status');
     const streamEl = panelEl.querySelector('#bn-api-stream');
+    const hintEl = panelEl.querySelector('#bn-api-provider-hint');
+    const keyLink = panelEl.querySelector('#bn-api-key-link');
 
-    // 加载已保存的值
-    const cfg = window.BiliSummary.state.settings.apiCfg || {};
-    const savedChannel = window.BiliSummary.state.settings.aiChannel || 'browser';
+    if (providerSelect && providers) {
+      providerSelect.innerHTML = providers.list
+        .map(p => `<option value="${escapeAttr(p.id)}">${escapeHtml(p.label)}</option>`)
+        .join('');
+    }
+
+    const savedChannel = window.BiliSummary.state.settings.aiChannel || 'api';
     const browserRadio = panelEl.querySelector('#bn-as-browser');
     const apiRadio = panelEl.querySelector('#bn-as-api');
     if (browserRadio && apiRadio) {
       browserRadio.checked = (savedChannel === 'browser');
       apiRadio.checked = (savedChannel === 'api');
     }
-    // AI 总结「自定义接口」通道选择
+
+    // AI 总结通道选择
     panelEl.querySelectorAll('input[name="bn-ai-channel-setting"]').forEach(r => {
       r.addEventListener('change', () => {
         window.BiliSummary.state.settings.aiChannel = r.value;
         window.BiliSummary.settings.save();
+        refreshAiStatusUI();
       });
     });
     // AI 模式切换（DeepSeek 浏览器 SDK）
@@ -1193,27 +1301,129 @@
     const modeRadio = panelEl.querySelector(`input[name="bn-ai-mode"][value="${savedMode}"]`);
     if (modeRadio) modeRadio.checked = true;
 
-    if (epEl) epEl.value = cfg.endpoint || 'https://api.deepseek.com/v1/chat/completions';
-    if (keyEl) keyEl.value = cfg.apiKey || '';
-    if (modelInput) modelInput.value = cfg.model || 'deepseek-chat';
-    if (streamEl) streamEl.checked = cfg.stream !== false;
+    function modelOptions(provider) {
+      if (fetchedModels && fetchedModels.length) return fetchedModels;
+      return (provider && provider.models) || [];
+    }
+
+    // 模型下拉：预设模型为默认项，获取到的在线列表优先展示
+    function renderModelSelect(provider, currentModel) {
+      if (!modelSelect) return;
+      const models = modelOptions(provider);
+      if (!models.length) {
+        modelSelect.innerHTML = '<option value="">-- 获取模型列表或手动输入 --</option>';
+        modelSelect.value = '';
+        return;
+      }
+      const options = models.map(m => {
+        const label = m.name && m.name !== m.id ? `${m.name} (${m.id})` : m.id;
+        return `<option value="${escapeAttr(m.id)}">${escapeHtml(label)}</option>`;
+      });
+      const matched = models.find(m => m.id === currentModel)
+        || models.find(m => m.id === (provider && provider.model))
+        || (models.length === 1 ? models[0] : null);
+      if (!matched && !provider.lockModel) {
+        options.unshift('<option value="">-- 选择模型 --</option>');
+      }
+      if (!provider.lockModel) {
+        options.push('<option value="__manual__">-- 手动输入其他模型 ID --</option>');
+      }
+      modelSelect.innerHTML = options.join('');
+      modelSelect.value = matched ? matched.id : '';
+    }
+
+    // 把保存的设置渲染到设置页
+    function renderApiConfig() {
+      const s = window.BiliSummary.state.settings;
+      const cfg = s.apiCfg || {};
+      const provider = getApiProvider();
+      if (providerSelect && providerSelect.value !== provider.id) providerSelect.value = provider.id;
+      if (epEl) {
+        epEl.value = cfg.endpoint || provider.endpoint || '';
+        epEl.readOnly = !!provider.lockEndpoint;
+        epEl.classList.toggle('bn-input-locked', !!provider.lockEndpoint);
+      }
+      if (keyEl) {
+        keyEl.value = cfg.apiKey || '';
+        keyEl.placeholder = provider.keyPlaceholder || 'sk-...';
+      }
+      if (modelInput) {
+        modelInput.value = cfg.model || provider.model || '';
+        modelInput.readOnly = !!provider.lockModel;
+        modelInput.classList.toggle('bn-input-locked', !!provider.lockModel);
+        // 固定模型的服务商只用下拉选择，隐藏重复的只读输入框
+        modelInput.style.display = provider.lockModel ? 'none' : '';
+      }
+      if (streamEl) streamEl.checked = cfg.stream !== false;
+      if (hintEl) hintEl.textContent = provider.description || '';
+      if (keyLink) {
+        const visible = !!provider.keyUrl;
+        keyLink.style.display = visible ? '' : 'none';
+        if (visible) {
+          keyLink.href = provider.keyUrl;
+          keyLink.textContent = provider.keyLabel || '获取 API Key ↗';
+        }
+      }
+      renderModelSelect(provider, cfg.model || provider.model);
+      renderApiUsage();
+    }
 
     function saveCfg() {
-      const newCfg = {
-        endpoint: epEl.value.trim(),
-        apiKey: keyEl.value.trim(),
-        model: modelInput.value.trim(),
-        stream: streamEl.checked,
+      const provider = getApiProvider();
+      const endpoint = provider.lockEndpoint
+        ? provider.endpoint
+        : ((epEl && epEl.value.trim()) || provider.endpoint || '');
+      const model = (modelInput && modelInput.value.trim()) || provider.model || '';
+      const apiKey = (keyEl && keyEl.value.trim()) || '';
+      const settings = window.BiliSummary.state.settings;
+      settings.apiProvider = provider.id;
+      settings.apiKeys = { ...(settings.apiKeys || {}), [provider.id]: apiKey };
+      settings.apiCfg = {
+        provider: provider.id,
+        endpoint,
+        apiKey,
+        model,
+        stream: streamEl ? streamEl.checked : true,
       };
-      window.BiliSummary.state.settings.apiCfg = newCfg;
       window.BiliSummary.settings.save();
+    }
+
+    // 切换服务商预设：OpenCode Go 固定 Endpoint 与模型
+    function applyProvider(provider) {
+      if (!provider) return;
+      const s = window.BiliSummary.state.settings;
+      const current = getApiProvider();
+      // 先记住当前服务商的 Key，再取出目标服务商自己的 Key（避免把 Key 发给别家）
+      const keyMap = { ...(s.apiKeys || {}) };
+      if (keyEl && current.id) keyMap[current.id] = keyEl.value.trim();
+      fetchedModels = null;
+      s.apiProvider = provider.id;
+      s.apiKeys = keyMap;
+      s.apiCfg = {
+        provider: provider.id,
+        endpoint: provider.endpoint,
+        apiKey: keyMap[provider.id] || '',
+        model: provider.model,
+        stream: streamEl ? streamEl.checked : true,
+      };
+      renderApiConfig();
+      window.BiliSummary.settings.save();
+      if (apiStatus) apiStatus.textContent = '';
+      refreshAiStatusUI();
+    }
+
+    if (providerSelect && providers) {
+      providerSelect.addEventListener('change', () => {
+        const provider = providers.get(providerSelect.value);
+        if (provider) applyProvider(provider);
+      });
     }
 
     // endpoint / key / model / stream 变化自动保存
     [epEl, keyEl, modelInput, streamEl].forEach(el => {
       if (!el) return;
-      el.addEventListener('change', saveCfg);
-      el.addEventListener('blur', saveCfg);
+      el.addEventListener('change', () => { saveCfg(); refreshAiStatusUI(); });
+      el.addEventListener('blur', () => { saveCfg(); });
     });
 
     // model select → input
@@ -1223,47 +1433,45 @@
         if (v && v !== '__manual__') {
           modelInput.value = v;
           saveCfg();
+          refreshAiStatusUI();
         } else if (v === '__manual__') {
           // 切回保留当前用户输入的模型，不做修改
           modelSelect.value = modelInput.value || '';
+          modelSelect.blur();
         }
       });
     }
 
-    // 获取模型列表
+    // 测试连接 / 获取模型列表
     if (fetchBtn) {
       fetchBtn.addEventListener('click', async () => {
+        const provider = getApiProvider();
+        const originalText = fetchBtn.textContent;
         fetchBtn.disabled = true;
-        fetchBtn.textContent = '获取中…';
-        apiStatus.textContent = '';
+        fetchBtn.textContent = '请求中…';
+        if (apiStatus) apiStatus.textContent = '';
         try {
-          const models = await window.BiliSummary.apiAI.fetchModels(epEl.value.trim(), keyEl.value.trim());
+          const endpoint = provider.lockEndpoint ? provider.endpoint : ((epEl && epEl.value.trim()) || provider.endpoint);
+          const models = await window.BiliSummary.apiAI.fetchModels(endpoint, keyEl ? keyEl.value.trim() : '', provider.id);
           if (!models || models.length === 0) {
-            apiStatus.textContent = '该接口未返回模型列表';
-            fetchBtn.disabled = false;
-            fetchBtn.textContent = '获取模型列表';
-            return;
+            if (apiStatus) apiStatus.textContent = '连接正常，但该接口未返回模型列表';
+          } else {
+            fetchedModels = models;
+            renderModelSelect(provider, (modelInput && modelInput.value.trim()) || provider.model);
+            if (apiStatus) apiStatus.textContent = `连接正常 · 返回 ${models.length} 个模型`;
           }
-          // 填充下拉；把占位项放最前并默认选中，保证后续任意选择都触发 change
-          modelSelect.innerHTML =
-            '<option value="">-- 点击选择模型 --</option>' +
-            models.map(m => {
-              const label = m.name && m.name !== m.id ? `${m.name} (${m.id})` : m.id;
-              return `<option value="${escapeAttr(m.id)}">${escapeHtml(label)}</option>`;
-            }).join('') +
-            '<option value="__manual__">-- 手动输入其他模型 ID --</option>';
-          // 如有已配置模型，选中它（但仍保持 select 当前指向占位项，强制用户一次有效选择）
-          modelSelect.value = '';
-          apiStatus.textContent = `已获取 ${models.length} 个模型`;
         } catch (err) {
-          apiStatus.textContent = '获取失败：' + (err.message || err);
-          modelSelect.innerHTML = '<option value="">获取失败</option>';
+          fetchedModels = null;
+          if (apiStatus) apiStatus.textContent = '失败：' + (err.message || err);
         } finally {
           fetchBtn.disabled = false;
-          fetchBtn.textContent = '获取模型列表';
+          fetchBtn.textContent = originalText;
         }
       });
     }
+
+    renderApiConfigUI = renderApiConfig;
+    renderApiConfig();
   }
 
   function getDefaultAiPrompt() {
@@ -1303,19 +1511,11 @@
     const autoSummaryEl = panelEl.querySelector('#bn-auto-summary');
     if (autoSummaryEl) autoSummaryEl.checked = s.autoSummary !== false;
 
-    // 通用 API 配置
-    const cfg = s.apiCfg || {};
-    const epEl = panelEl.querySelector('#bn-api-endpoint');
-    const keyEl = panelEl.querySelector('#bn-api-key');
-    const modelInput = panelEl.querySelector('#bn-api-model-input');
-    const streamEl = panelEl.querySelector('#bn-api-stream');
-    if (epEl) epEl.value = cfg.endpoint || 'https://api.deepseek.com/v1/chat/completions';
-    if (keyEl) keyEl.value = cfg.apiKey || '';
-    if (modelInput) modelInput.value = cfg.model || 'deepseek-v4-flash';
-    if (streamEl) streamEl.checked = cfg.stream !== false;
+    // AI 接口配置（服务商预设 / Endpoint / API Key / 模型 / 用量）
+    if (renderApiConfigUI) renderApiConfigUI();
 
     // AI 总结通道
-    const savedChannel = s.aiChannel || 'browser';
+    const savedChannel = s.aiChannel || 'api';
     const browserRadio = panelEl.querySelector('#bn-as-browser');
     const apiRadio = panelEl.querySelector('#bn-as-api');
     if (browserRadio && apiRadio) {
@@ -1545,5 +1745,8 @@
   };
   if (window.BiliSummary.__testHooks) {
     window.BiliSummary.__testHooks.calculateLeftResizeGeometry = calculateLeftResizeGeometry;
+    window.BiliSummary.__testHooks.formatApiUsage = formatApiUsage;
+    window.BiliSummary.__testHooks.getApiProvider = getApiProvider;
+    window.BiliSummary.__testHooks.buildSettingHTML = buildSettingHTML;
   }
 })();

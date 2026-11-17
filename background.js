@@ -4,7 +4,7 @@
  */
 console.log('[BiliSummary] SW loaded at', Date.now());
 
-importScripts('js/prompt.js');
+importScripts('js/prompt.js', 'js/providers.js');
 
 // ── 图标状态管理 ──
 
@@ -296,10 +296,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'api-send') {
     (async () => {
       const cfg = {
+        provider: (message.provider || '').trim(),
         endpoint: (message.endpoint || '').trim(),
         apiKey: (message.apiKey || '').trim(),
         model: (message.model || '').trim(),
         stream: message.stream !== false,
+        sessionId: (message.sessionId || '').trim(),
       };
       apiStreamCompletion(message.messages, cfg, message.requestId);
     })();
@@ -318,6 +320,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'api-fetch-models') {
     (async () => {
       const cfg = {
+        provider: (message.provider || '').trim(),
         endpoint: (message.endpoint || '').trim(),
         apiKey: (message.apiKey || '').trim(),
       };
@@ -615,16 +618,53 @@ function formatDate(timestamp) {
 // 走 background fetch 绕过 content_scripts 的 CORS 限制。
 // 兼容 OpenAI 风格：POST {messages[], model, stream?} -> SSE 或一次性 JSON
 
+function apiResolveProvider(providerId, endpoint) {
+  if (typeof BS_AI_PROVIDERS === 'undefined') return null;
+  return BS_AI_PROVIDERS.resolve(providerId, endpoint);
+}
+
+/**
+ * 把 HTTP 错误翻译成用户能看懂的提示（OpenCode Go 额外给出排障建议）
+ */
+function apiErrorText(status, bodyText, provider) {
+  const detail = String(bodyText || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const hintMap = {
+    400: '请求参数有误',
+    401: 'API Key 无效或已过期',
+    402: '额度不足',
+    403: '无权访问该接口或模型',
+    404: '接口地址或模型不存在',
+    429: '请求过于频繁或额度已用尽',
+  };
+  let hint = hintMap[status] || (status >= 500 ? '服务端错误，请稍后重试' : '');
+  if (provider && provider.id === 'opencode-go') {
+    if (status === 401) hint += '，请到 OpenCode Console 重新创建 API Key';
+    else if (status === 403) hint += '，请确认已订阅 OpenCode Go 且允许 DeepSeek V4.1 Flash（免费模型仅限 OpenCode 客户端调用）';
+    else if (status === 429) hint += '，OpenCode Go 的 5 小时 / 每周 / 每月额度可能已用尽';
+  }
+  return [`HTTP ${status}`, hint, detail].filter(Boolean).join(' · ');
+}
+
 async function apiStreamCompletion(messages, cfg, requestId) {
-  const headers = {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${cfg.apiKey}`,
-  };
-  const payload = {
-    model: cfg.model,
-    messages,
-    stream: cfg.stream,
-  };
+  const provider = apiResolveProvider(cfg.provider, cfg.endpoint);
+  const request = typeof BS_AI_PROVIDERS !== 'undefined'
+    ? BS_AI_PROVIDERS.buildChatRequest({
+        providerId: cfg.provider,
+        endpoint: cfg.endpoint,
+        apiKey: cfg.apiKey,
+        model: cfg.model,
+        messages,
+        stream: cfg.stream,
+        sessionId: cfg.sessionId,
+      })
+    : {
+        url: cfg.endpoint,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${cfg.apiKey}`,
+        },
+        payload: { model: cfg.model, messages, stream: cfg.stream },
+      };
 
   // 仅响应发起方的标签页
   const activeTabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -635,25 +675,74 @@ async function apiStreamCompletion(messages, cfg, requestId) {
     chrome.tabs.sendMessage(senderTabId, { ...msg, requestId }).catch(() => {});
   };
 
+  // 解析单个 SSE 数据对象，返回 true 表示需要终止流（业务错误）
+  const handlePayload = (parsed) => {
+    if (!parsed || typeof parsed !== 'object') return false;
+    if (parsed.usage) forward({ type: 'api-usage', usage: parsed.usage });
+    if (parsed.error) {
+      const err = parsed.error;
+      const text = typeof err === 'string' ? err : (err.message || JSON.stringify(err));
+      forward({ type: 'api-error', error: String(text).slice(0, 300) });
+      return true;
+    }
+    // 标准 OpenAI 风格
+    const choice = parsed.choices?.[0];
+    if (!choice) {
+      // DeepSeek 自定义 chunk：content / reasoning 等字段
+      if (parsed.content || parsed.reasoning) {
+        if (parsed.reasoning) forward({ type: 'api-chunk', role: 'think', text: parsed.reasoning });
+        if (parsed.content) forward({ type: 'api-chunk', role: 'response', text: parsed.content });
+      }
+      return false;
+    }
+    const delta = choice.delta || choice.message || {};
+    if (delta.content) {
+      forward({ type: 'api-chunk', role: 'response', text: delta.content });
+    }
+    if (delta.reasoning_content) {
+      forward({ type: 'api-chunk', role: 'think', text: delta.reasoning_content });
+    } else if (delta.reasoning) {
+      forward({ type: 'api-chunk', role: 'think', text: delta.reasoning });
+    }
+    return false;
+  };
+
   try {
     apiAbortController = new AbortController();
-    const res = await fetch(cfg.endpoint, {
+    const res = await fetch(request.url, {
       method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
+      headers: request.headers,
+      body: JSON.stringify(request.payload),
       signal: apiAbortController.signal,
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      forward({ type: 'api-error', error: `HTTP ${res.status} ${text.slice(0, 300)}` });
+      forward({ type: 'api-error', error: apiErrorText(res.status, text, provider) });
       return;
     }
 
-    if (cfg.stream && res.headers.get('content-type')?.includes('text/event-stream')) {
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    const isSse = cfg.stream && /event-stream|ndjson|text\/plain/.test(contentType);
+
+    if (isSse && res.body) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      while (true) {
+      let failed = false;
+
+      const consumeEvent = (eventStr) => {
+        for (const line of eventStr.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          const jsonStr = line.slice(5).trim();
+          if (!jsonStr || jsonStr === '[DONE]') continue;
+          let parsed;
+          try { parsed = JSON.parse(jsonStr); } catch { continue; }
+          if (handlePayload(parsed)) failed = true;
+        }
+        return failed;
+      };
+
+      while (!failed) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -662,37 +751,23 @@ async function apiStreamCompletion(messages, cfg, requestId) {
           if (idx === -1) break;
           const eventStr = buffer.slice(0, idx).trim();
           buffer = buffer.slice(idx + 2);
-          for (const line of eventStr.split('\n')) {
-            if (!line.startsWith('data:')) continue;
-            const jsonStr = line.slice(5).trim();
-            if (!jsonStr || jsonStr === '[DONE]') continue;
-            let parsed;
-            try { parsed = JSON.parse(jsonStr); } catch { continue; }
-            // 标准 OpenAI 风格
-            const choice = parsed.choices?.[0];
-            if (!choice) {
-              // DeepSeek 自定义 chunk：content / reasoning 等字段
-              if (parsed.content || parsed.reasoning) {
-                if (parsed.reasoning) forward({ type: 'api-chunk', role: 'think', text: parsed.reasoning });
-                if (parsed.content) forward({ type: 'api-chunk', role: 'response', text: parsed.content });
-              }
-              continue;
-            }
-            const delta = choice.delta || {};
-            if (delta.content) {
-              forward({ type: 'api-chunk', role: 'response', text: delta.content });
-            }
-            if (delta.reasoning_content) {
-              forward({ type: 'api-chunk', role: 'think', text: delta.reasoning_content });
-            }
-          }
+          if (consumeEvent(eventStr)) break;
         }
       }
+      if (!failed && buffer.trim()) consumeEvent(buffer.trim());
+      if (failed) return;
     } else {
       // 非流式：一次性返回完整文本
       let data;
       try { data = await res.json(); } catch {
-        forward({ type: 'api-error', error: '解析响应 JSON 失败' });
+        forward({ type: 'api-error', error: '解析响应 JSON 失败（接口返回的不是 JSON，请检查 Endpoint 是否正确）' });
+        return;
+      }
+      if (data && data.usage) forward({ type: 'api-usage', usage: data.usage });
+      if (data && data.error) {
+        const err = data.error;
+        const text = typeof err === 'string' ? err : (err.message || JSON.stringify(err));
+        forward({ type: 'api-error', error: String(text).slice(0, 300) });
         return;
       }
       const content = data.choices?.[0]?.message?.content
@@ -717,32 +792,76 @@ async function apiStreamCompletion(messages, cfg, requestId) {
   }
 }
 
+/**
+ * 归一化模型列表响应：兼容 OpenAI / 数组 / 映射表等多种形态
+ */
+function apiNormalizeModelList(data) {
+  const models = [];
+  const push = (id, name) => {
+    const modelId = String(id || '').trim();
+    if (!modelId) return;
+    if (models.some(item => item.id === modelId)) return;
+    models.push({ id: modelId, name: String(name || modelId) });
+  };
+
+  const list = Array.isArray(data) ? data
+    : Array.isArray(data?.data) ? data.data
+      : Array.isArray(data?.models) ? data.models
+        : null;
+
+  if (list) {
+    for (const item of list) {
+      if (typeof item === 'string') push(item, item);
+      else if (item && typeof item === 'object') push(item.id || item.model || item.name, item.name || item.display_name || item.id);
+    }
+    return models;
+  }
+
+  if (data && typeof data === 'object') {
+    // 形如 { "deepseek-v4.1-flash": { "name": "DeepSeek V4.1 Flash" } }
+    for (const key of Object.keys(data)) {
+      if (['object', 'data', 'models', 'error', 'message', 'usage'].includes(key)) continue;
+      const value = data[key];
+      if (value && typeof value === 'object') push(value.id || key, value.name || key);
+    }
+  }
+  return models;
+}
+
 // 获取厂商模型列表：GET {base}/models 或 {base}/v1/models
 async function apiFetchModels(cfg) {
-  let base = cfg.endpoint.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '');
-  const candidates = [
-    `${base}/models`,
-    `${base}/v1/models`,
-  ];
+  const provider = apiResolveProvider(cfg.provider, cfg.endpoint);
+  const headers = { 'Authorization': `Bearer ${cfg.apiKey}` };
+  if (provider && provider.sessionHeader && typeof BS_AI_PROVIDERS !== 'undefined') {
+    headers[provider.sessionHeader] = BS_AI_PROVIDERS.createSessionId();
+  }
+
+  let candidates;
+  if (typeof BS_AI_PROVIDERS !== 'undefined') {
+    candidates = BS_AI_PROVIDERS.modelListUrls(cfg.endpoint, cfg.provider);
+  } else {
+    const base = cfg.endpoint.replace(/\/chat\/completions\/?$/, '').replace(/\/+$/, '');
+    candidates = [`${base}/models`, `${base}/v1/models`];
+  }
+
+  let lastStatus = 0;
   for (const url of candidates) {
     try {
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${cfg.apiKey}` },
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : null);
-      if (!list) {
-        if (Array.isArray(data) && data.length && data[0]?.id) return data.map(it => ({ id: it.id, name: it.name || it.id }));
+      const res = await fetch(url, { method: 'GET', headers });
+      if (!res.ok) {
+        lastStatus = res.status;
         continue;
       }
-      return list.map(it => ({ id: it.id, name: it.name || it.id }));
+      const data = await res.json();
+      const models = apiNormalizeModelList(data);
+      if (models.length) return models;
     } catch (e) {
       continue;
     }
   }
-  throw new Error('无法从该接口获取模型列表；请检查 endpoint / apiKey 是否正确');
+  if (lastStatus === 401) throw new Error('API Key 无效或已过期（HTTP 401）');
+  if (lastStatus === 403) throw new Error('该 API Key 无权访问模型列表（HTTP 403）');
+  throw new Error('无法从该接口获取模型列表；请检查 Endpoint / API Key 是否正确');
 }
 
 // ════════════════════════════════════════════════════════════════

@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.2.0] - 2026-11-01
+
+### Added
+- 新增 OpenCode Go 服务商预设并作为默认配置：默认 Endpoint `https://opencode.ai/inference/go/openai/v1/chat/completions`，模型 `deepseek-v4.1-flash`（DeepSeek V4.1 Flash）
+- 新增 `js/providers.js` 共享服务商注册表，统一管理 Endpoint、模型、鉴权头与模型列表地址
+- 设置页新增「服务商」选择、固定项只读样式、OpenCode Console 取 Keys 入口与「测试连接 / 获取模型」
+- API Key 按服务商分别保存：切换服务商时不会把上一个服务商的 Key 发给新服务商
+- 新增 OpenCode 协议适配：请求携带 `x-opencode-session` 会话标识，流式请求开启 `stream_options.include_usage`
+- 新增用量展示：解析 `usage.opencode`，显示本次计入的 Go 套餐额度、计费来源与 token 数
+- 新增 OpenCode Go 相关测试（预设默认值、请求构造、background SSE 转发、额度解析）与旧配置迁移测试
+
+### Changed
+- 默认 AI 通道由 DeepSeek 浏览器 SDK 改为 OpenCode Go API 通道（仍可在设置页切回 DeepSeek 浏览器 SDK）
+- 兼容旧配置：缺少服务商字段的配置按 Endpoint 识别，无法识别时保持为「自定义接口」并保留原 Endpoint / 模型 / Key
+- 错误提示改为友好文案，OpenCode Go 的 401 / 403 / 429 附带排障建议
+- 模型列表获取兼容 OpenCode 网关路径（`/inference/go/v1/models`）与多种返回格式
+- manifest 新增 `https://opencode.ai/*` host 权限并更新描述，版本号提升至 `1.2.0`
+
 ## [1.1.6] - 2026-08-11
 
 ### Fixed
