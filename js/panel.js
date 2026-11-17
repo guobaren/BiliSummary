@@ -1339,7 +1339,7 @@
       const provider = getApiProvider();
       if (providerSelect && providerSelect.value !== provider.id) providerSelect.value = provider.id;
       if (epEl) {
-        epEl.value = cfg.endpoint || provider.endpoint || '';
+        epEl.value = cfg.endpoint ?? provider.endpoint ?? '';
         epEl.readOnly = !!provider.lockEndpoint;
         epEl.classList.toggle('bn-input-locked', !!provider.lockEndpoint);
       }
@@ -1348,7 +1348,7 @@
         keyEl.placeholder = provider.keyPlaceholder || 'sk-...';
       }
       if (modelInput) {
-        modelInput.value = cfg.model || provider.model || '';
+        modelInput.value = cfg.model ?? provider.model ?? '';
         modelInput.readOnly = !!provider.lockModel;
         modelInput.classList.toggle('bn-input-locked', !!provider.lockModel);
         // 固定模型的服务商只用下拉选择，隐藏重复的只读输入框
@@ -1372,10 +1372,19 @@
       const provider = getApiProvider();
       const endpoint = provider.lockEndpoint
         ? provider.endpoint
-        : ((epEl && epEl.value.trim()) || provider.endpoint || '');
-      const model = (modelInput && modelInput.value.trim()) || provider.model || '';
-      const apiKey = (keyEl && keyEl.value.trim()) || '';
+        : ((epEl && epEl.value.trim()) || '');
       const settings = window.BiliSummary.state.settings;
+      const addressChanged = provider.id === 'custom' && endpoint !== (settings.apiCfg?.endpoint || '');
+      if (addressChanged) {
+        // 地址变更立即作废旧密钥、模型和模型列表，保留新的地址与流式选项。
+        if (keyEl) keyEl.value = '';
+        if (modelInput) modelInput.value = '';
+        fetchedModels = null;
+        if (apiStatus) apiStatus.textContent = '接口地址已更改，请重新填写 API Key 和模型';
+        renderModelSelect(provider, '');
+      }
+      const model = provider.lockModel ? provider.model : ((modelInput && modelInput.value.trim()) || '');
+      const apiKey = (keyEl && keyEl.value.trim()) || '';
       settings.apiProvider = provider.id;
       settings.apiKeys = { ...(settings.apiKeys || {}), [provider.id]: apiKey };
       settings.apiCfg = {
@@ -1392,19 +1401,18 @@
     function applyProvider(provider) {
       if (!provider) return;
       const s = window.BiliSummary.state.settings;
-      const current = getApiProvider();
-      // 先记住当前服务商的 Key，再取出目标服务商自己的 Key（避免把 Key 发给别家）
+      saveCfg();
       const keyMap = { ...(s.apiKeys || {}) };
-      if (keyEl && current.id) keyMap[current.id] = keyEl.value.trim();
+      const saved = s.apiConfigs?.[provider.id];
       fetchedModels = null;
       s.apiProvider = provider.id;
       s.apiKeys = keyMap;
       s.apiCfg = {
         provider: provider.id,
-        endpoint: provider.endpoint,
+        endpoint: provider.lockEndpoint ? provider.endpoint : (saved?.endpoint ?? provider.endpoint),
         apiKey: keyMap[provider.id] || '',
-        model: provider.model,
-        stream: streamEl ? streamEl.checked : true,
+        model: provider.lockModel ? provider.model : (saved?.model ?? provider.model),
+        stream: saved?.stream ?? true,
       };
       renderApiConfig();
       window.BiliSummary.settings.save();
@@ -1426,6 +1434,9 @@
       el.addEventListener('blur', () => { saveCfg(); });
     });
 
+    // input 时立即清空旧凭据，覆盖粘贴、键入及随后直接点击测试连接的路径。
+    if (epEl) epEl.addEventListener('input', () => { saveCfg(); refreshAiStatusUI(); });
+
     // model select → input
     if (modelSelect) {
       modelSelect.addEventListener('change', () => {
@@ -1445,6 +1456,7 @@
     // 测试连接 / 获取模型列表
     if (fetchBtn) {
       fetchBtn.addEventListener('click', async () => {
+        saveCfg();
         const provider = getApiProvider();
         const originalText = fetchBtn.textContent;
         fetchBtn.disabled = true;

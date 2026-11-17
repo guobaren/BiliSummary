@@ -31,6 +31,7 @@
     floatIconEnabled: true, // 浮动图标常驻
     autoSummary: true,      // 打开面板后自动开始总结
     apiProvider: DEFAULT_API_CFG.provider, // 'opencode-go' | 'custom'
+    apiConfigs: {},         // 按服务商保存完整配置
     apiKeys: {},            // 按服务商保存的 API Key，切换服务商时避免互相串用
     apiCfg: { ...DEFAULT_API_CFG },
   };
@@ -77,7 +78,7 @@
     };
 
     if (provider.lockEndpoint || !merged.endpoint) merged.endpoint = provider.endpoint;
-    if (provider.lockModel || !merged.model) merged.model = provider.model;
+    if (provider.lockModel || merged.model == null) merged.model = provider.model;
     if (merged.stream === undefined) merged.stream = true;
 
     // 每个服务商各存一份 API Key：切换服务商时不会把上一个服务商的 Key 发给新服务商
@@ -86,6 +87,7 @@
     settings.apiKeys = keyMap;
     settings.apiProvider = provider.id;
     settings.apiCfg = merged;
+    settings.apiConfigs = { ...(settings.apiConfigs || {}), [provider.id]: { ...merged } };
   }
 
   async function load() {
@@ -116,6 +118,8 @@
   async function save() {
     return new Promise(resolve => {
       const settings = window.BiliSummary.state.settings;
+      settings.apiConfigs = { ...(settings.apiConfigs || {}), [settings.apiProvider]: { ...settings.apiCfg } };
+      settings.apiKeys = { ...(settings.apiKeys || {}), [settings.apiProvider]: settings.apiCfg.apiKey || '' };
       chrome.storage.local.set({
         bilisummary_settings: { ...settings },
       }, () => {
@@ -132,11 +136,13 @@
     // 保留提示词与 API Key，其余恢复默认（含默认 OpenCode Go 预设）
     const preserved = {
       deepseekPrompt: s.deepseekPrompt,
+      apiConfigs: { ...(s.apiConfigs || {}) },
       apiKeys: (s.apiKeys && typeof s.apiKeys === 'object') ? { ...s.apiKeys } : {},
     };
     Object.assign(s, { ...DEFAULTS }, { deepseekPrompt: preserved.deepseekPrompt });
     s.apiProvider = DEFAULTS.apiProvider;
     s.apiKeys = preserved.apiKeys;
+    s.apiConfigs = preserved.apiConfigs;
     s.apiCfg = { ...DEFAULTS.apiCfg, apiKey: preserved.apiKeys[DEFAULTS.apiProvider] || '' };
     save();
   }

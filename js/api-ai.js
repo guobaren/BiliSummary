@@ -143,7 +143,7 @@
         const defaultEndpoint = PROVIDERS ? PROVIDERS.resolve(provider, cfg.endpoint).endpoint : 'https://api.deepseek.com/v1/chat/completions';
         const merged = {
           endpoint: endpoint || cfg.endpoint || defaultEndpoint,
-          apiKey: apiKey || cfg.apiKey || '',
+          apiKey: apiKey ?? cfg.apiKey ?? '',
         };
         chrome.runtime.sendMessage({
           type: 'api-fetch-models',

@@ -35,7 +35,7 @@ function createChrome(stored) {
           }
           callback(result);
         },
-        set(value, callback) { if (callback) callback(); },
+        set(value, callback) { Object.assign(state.stored, structuredClone(value)); if (callback) callback(); },
         remove() {},
       },
     },
@@ -325,7 +325,71 @@ function testPanelUsageAndProviderTag() {
   assert.match(html, /OpenCode Go 套餐（仅提供 DeepSeek V4.1 Flash）/, '设置页应说明默认套餐与模型');
 }
 
+
+async function testProviderSwitchAndAddressInvalidation() {
+  const { chrome, state } = createChrome({ bilisummary_settings: {
+    aiChannel: 'api', apiProvider: 'custom', apiCfg: {
+      provider: 'custom', endpoint: 'https://api.openai.com/v1/chat/completions',
+      apiKey: 'dummy-custom-key', model: 'gpt-4o', stream: false,
+    },
+  } });
+  const context = createContext(chrome);
+  await loadSettings(context, chrome);
+  const BN = context.window.BiliSummary;
+  BN.__testHooks = {};
+  const nodes = new Map();
+  function node(id) {
+    if (!nodes.has(id)) nodes.set(id, {
+      value: '', checked: true, style: {}, classList: { toggle() {} }, listeners: {},
+      addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+      fire(type) { for (const fn of this.listeners[type] || []) fn(); },
+    });
+    return nodes.get(id);
+  }
+  const panel = { querySelector: node, querySelectorAll: () => [] };
+  const source = read('js/panel.js').replace('  if (window.BiliSummary.__testHooks) {',
+    '  panelEl = __panel; window.BiliSummary.__testHooks.bindApiConfigEvents = bindApiConfigEvents;\n  if (window.BiliSummary.__testHooks) {');
+  context.__panel = panel;
+  vm.runInContext(source, vm.createContext(context));
+  BN.__testHooks.bindApiConfigEvents();
+  const provider = node('#bn-api-provider');
+  function switchTo(id) { provider.value = id; provider.fire('change'); }
+  switchTo('opencode-go');
+  node('#bn-api-key').value = 'dummy-go-key'; node('#bn-api-key').fire('change');
+  switchTo('custom');
+  assert.equal(node('#bn-api-endpoint').value, 'https://api.openai.com/v1/chat/completions');
+  assert.equal(node('#bn-api-key').value, 'dummy-custom-key');
+  assert.equal(node('#bn-api-model-input').value, 'gpt-4o');
+  assert.equal(node('#bn-api-stream').checked, false);
+  node('#bn-api-endpoint').value = 'https://api.deepseek.com/v1/chat/completions';
+  node('#bn-api-endpoint').fire('input');
+  assert.equal(node('#bn-api-key').value, '');
+  assert.equal(node('#bn-api-model-input').value, '');
+  const saved = state.stored.bilisummary_settings;
+  assert.equal(saved.apiKeys.custom, '');
+  assert.equal(saved.apiConfigs.custom.apiKey, '');
+  assert.equal(saved.apiConfigs.custom.model, '');
+  assert.equal(saved.apiConfigs.custom.endpoint, 'https://api.deepseek.com/v1/chat/completions');
+  assert.equal(saved.apiConfigs.custom.stream, false);
+  assert.ok(!JSON.stringify(saved).includes('dummy-custom-key'), '本地保存信息不能残留旧密钥');
+  switchTo('opencode-go');
+  assert.equal(node('#bn-api-key').value, 'dummy-go-key');
+  switchTo('custom');
+  assert.equal(node('#bn-api-key').value, '');
+  assert.equal(node('#bn-api-model-input').value, '');
+  const reloaded = await loadSettings(createContext(chrome), chrome);
+  assert.equal(reloaded.apiCfg.model, '', '重载不能恢复旧模型或默认模型');
+  assert.equal(reloaded.apiCfg.apiKey, '');
+  node('#bn-api-key').value = 'dummy-new-key'; node('#bn-api-key').fire('change');
+  node('#bn-api-endpoint').fire('blur');
+  assert.equal(BN.state.settings.apiCfg.apiKey, 'dummy-new-key', '地址未变化不能重复清空密钥');
+  vm.runInContext(read('js/api-ai.js'), vm.createContext(context));
+  await BN.apiAI.fetchModels('https://new.example/v1/chat/completions', '', 'custom');
+  assert.equal(state.sentMessages.at(-1).apiKey, '', '显式空密钥不能回退到保存的密钥');
+}
+
 async function run() {
+  await testProviderSwitchAndAddressInvalidation();
   await testDefaultConfig();
   await testLegacyConfigMigration();
   await testOpenCodeConfigIsPinned();
